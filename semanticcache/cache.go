@@ -47,7 +47,7 @@ func NewSemanticCache[K comparable, V any](
 	mu := &sync.RWMutex{}
 
 	// Set up the eviction callback at construction using NewWithEvict
-	lruCache, err := lru.NewWithEvict[K, Entry[V]](capacity, func(key K, _ Entry[V]) {
+	lruCache, err := lru.NewWithEvict(capacity, func(key K, _ Entry[V]) {
 		mu.Lock()
 		defer mu.Unlock()
 		delete(index, key)
@@ -114,7 +114,7 @@ func (sc *SemanticCache[K, V]) Delete(key K) {
 // Flush clears all entries from the cache and the index.
 func (sc *SemanticCache[K, V]) Flush() error {
 	// Create a new cache with the same eviction callback
-	newCache, err := lru.NewWithEvict[K, Entry[V]](sc.capacity, func(key K, _ Entry[V]) {
+	newCache, err := lru.NewWithEvict(sc.capacity, func(key K, _ Entry[V]) {
 		sc.mu.Lock()
 		defer sc.mu.Unlock()
 		delete(sc.index, key)
@@ -214,7 +214,7 @@ func sqrt(x float32) float32 {
 		return 0
 	}
 	z := x / 2
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		z -= (z*z - x) / (2 * z)
 	}
 	return z
