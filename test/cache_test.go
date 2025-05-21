@@ -16,29 +16,10 @@ func (m *mockProvider) EmbedText(text string) ([]float32, error) {
 }
 func (m *mockProvider) Close() {}
 
-// Simple cosine similarity, just as before.
-func cosine(a, b []float32) float32 {
-	var dot, na, nb float32
-	for i := range a {
-		dot += a[i] * b[i]
-		na += a[i] * a[i]
-		nb += b[i] * b[i]
-	}
-	return dot / (sqrt(na) * sqrt(nb))
-}
-
-func sqrt(x float32) float32 {
-	z := x
-	for range 10 {
-		z -= (z*z - x) / (2 * z)
-	}
-	return z
-}
-
 func TestLookup(t *testing.T) {
 	embedding := []float32{0.1, 0.2}
 	provider := &mockProvider{embedding: embedding}
-	cache, err := semanticcache.NewSemanticCache[string](10, provider, cosine)
+	cache, err := semanticcache.NewSemanticCache[string, string](10, provider, nil)
 	if err != nil {
 		t.Fatalf("Failed to create cache: %v", err)
 	}

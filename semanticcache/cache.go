@@ -21,41 +21,57 @@ type Match[V any] struct {
 }
 
 // SemanticCache is an in-memory semantic cache with LRU eviction and embedding-based lookup.
-type SemanticCache[V any] struct {
-	mu         sync.RWMutex
-	cache      *lru.Cache[string, Entry[V]]
-	index      map[string][]float32 // key -> embedding, for brute force search
-	provider   EmbeddingProvider    // interface for embedding text
+type SemanticCache[K comparable, V any] struct {
+	mu         *sync.RWMutex
+	cache      *lru.Cache[K, Entry[V]]
+	index      map[K][]float32
+	provider   EmbeddingProvider
 	capacity   int
-	comparator func(a, b []float32) float32 // Similarity function
+	comparator func(a, b []float32) float32
 }
 
 // NewSemanticCache creates a SemanticCache with the given capacity and embedding provider.
 // comparator is optional; if nil, defaults to cosine similarity.
-func NewSemanticCache[V any](capacity int, provider EmbeddingProvider, comparator func(a, b []float32) float32) (*SemanticCache[V], error) {
+func NewSemanticCache[K comparable, V any](
+	capacity int,
+	provider EmbeddingProvider,
+	comparator func(a, b []float32) float32,
+) (*SemanticCache[K, V], error) {
 	if provider == nil {
 		return nil, errors.New("embedding provider cannot be nil")
 	}
 	if comparator == nil {
 		comparator = CosineSimilarity
 	}
-	lruCache, err := lru.New[string, Entry[V]](capacity)
+	index := make(map[K][]float32)
+	mu := &sync.RWMutex{}
+
+	// Set up the eviction callback at construction using NewWithEvict
+	lruCache, err := lru.NewWithEvict[K, Entry[V]](capacity, func(key K, _ Entry[V]) {
+		mu.Lock()
+		defer mu.Unlock()
+		delete(index, key)
+	})
 	if err != nil {
 		return nil, err
 	}
-	return &SemanticCache[V]{
+
+	sc := &SemanticCache[K, V]{
 		cache:      lruCache,
-		index:      make(map[string][]float32),
+		index:      index,
 		provider:   provider,
 		capacity:   capacity,
 		comparator: comparator,
-	}, nil
+		mu:         mu,
+	}
+
+	return sc, nil
 }
 
 // Set stores or updates the entry for key with embedding computed from inputText.
-func (sc *SemanticCache[V]) Set(key, inputText string, value V) error {
-	if key == "" {
-		return errors.New("key cannot be empty")
+func (sc *SemanticCache[K, V]) Set(key K, inputText string, value V) error {
+	if key == *new(K) { // Zero value check for K
+		return errors.New("key cannot be zero value")
 	}
 	embedding, err := sc.provider.EmbedText(inputText)
 	if err != nil {
@@ -70,7 +86,7 @@ func (sc *SemanticCache[V]) Set(key, inputText string, value V) error {
 }
 
 // Get retrieves the value for key, if present.
-func (sc *SemanticCache[V]) Get(key string) (V, bool) {
+func (sc *SemanticCache[K, V]) Get(key K) (V, bool) {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 	if entry, ok := sc.cache.Get(key); ok {
@@ -81,42 +97,47 @@ func (sc *SemanticCache[V]) Get(key string) (V, bool) {
 }
 
 // Contains checks for key presence without affecting recency.
-func (sc *SemanticCache[V]) Contains(key string) bool {
+func (sc *SemanticCache[K, V]) Contains(key K) bool {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 	return sc.cache.Contains(key)
 }
 
 // Delete removes the entry for key.
-func (sc *SemanticCache[V]) Delete(key string) {
+func (sc *SemanticCache[K, V]) Delete(key K) {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	sc.cache.Remove(key)
-	delete(sc.index, key)
+	// index cleanup handled by eviction callback
 }
 
-// Flush clears all entries from the cache.
-func (sc *SemanticCache[V]) Flush() error {
-	newCache, err := lru.New[string, Entry[V]](sc.capacity)
+// Flush clears all entries from the cache and the index.
+func (sc *SemanticCache[K, V]) Flush() error {
+	// Create a new cache with the same eviction callback
+	newCache, err := lru.NewWithEvict[K, Entry[V]](sc.capacity, func(key K, _ Entry[V]) {
+		sc.mu.Lock()
+		defer sc.mu.Unlock()
+		delete(sc.index, key)
+	})
 	if err != nil {
 		return err
 	}
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	sc.cache = newCache
-	sc.index = make(map[string][]float32)
+	sc.index = make(map[K][]float32)
 	return nil
 }
 
 // Len returns the number of items in the cache.
-func (sc *SemanticCache[V]) Len() int {
+func (sc *SemanticCache[K, V]) Len() int {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 	return sc.cache.Len()
 }
 
 // Lookup returns the first value whose embedding similarity >= threshold.
-func (sc *SemanticCache[V]) Lookup(inputText string, threshold float32) (V, bool, error) {
+func (sc *SemanticCache[K, V]) Lookup(inputText string, threshold float32) (V, bool, error) {
 	embedding, err := sc.provider.EmbedText(inputText)
 	if err != nil {
 		var zero V
@@ -138,7 +159,7 @@ func (sc *SemanticCache[V]) Lookup(inputText string, threshold float32) (V, bool
 }
 
 // TopMatches returns up to n matches sorted by descending similarity.
-func (sc *SemanticCache[V]) TopMatches(inputText string, n int) ([]Match[V], error) {
+func (sc *SemanticCache[K, V]) TopMatches(inputText string, n int) ([]Match[V], error) {
 	embedding, err := sc.provider.EmbedText(inputText)
 	if err != nil {
 		return nil, err
@@ -164,7 +185,7 @@ func (sc *SemanticCache[V]) TopMatches(inputText string, n int) ([]Match[V], err
 }
 
 // Close frees resources used by the provider.
-func (sc *SemanticCache[V]) Close() {
+func (sc *SemanticCache[K, V]) Close() {
 	if sc.provider != nil {
 		sc.provider.Close()
 	}
@@ -176,7 +197,7 @@ func CosineSimilarity(a, b []float32) float32 {
 		return 0
 	}
 	var dot, normA, normB float32
-	for i := 0; i < len(a); i++ {
+	for i := range a {
 		dot += a[i] * b[i]
 		normA += a[i] * a[i]
 		normB += b[i] * b[i]
