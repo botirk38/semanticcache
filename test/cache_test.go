@@ -6,6 +6,17 @@ import (
 	"github.com/botirk38/semanticcache/semanticcache"
 )
 
+// Mock provider always returns the given "embedding" for a text.
+type mockProvider struct {
+	embedding []float32
+}
+
+func (m *mockProvider) EmbedText(text string) ([]float32, error) {
+	return m.embedding, nil
+}
+func (m *mockProvider) Close() {}
+
+// Simple cosine similarity, just as before.
 func cosine(a, b []float32) float32 {
 	var dot, na, nb float32
 	for i := range a {
@@ -18,25 +29,30 @@ func cosine(a, b []float32) float32 {
 
 func sqrt(x float32) float32 {
 	z := x
-	loop_end := 10
-	for range loop_end {
+	for range 10 {
 		z -= (z*z - x) / (2 * z)
 	}
 	return z
 }
 
 func TestLookup(t *testing.T) {
-	cache, err := semanticcache.New(10, cosine)
+	embedding := []float32{0.1, 0.2}
+	provider := &mockProvider{embedding: embedding}
+	cache, err := semanticcache.NewSemanticCache(10, provider, cosine)
 	if err != nil {
 		t.Fatalf("Failed to create cache: %v", err)
 	}
 
-	if err := cache.Set("foo", []float32{0.1, 0.2}, "bar"); err != nil {
+	// Set uses inputText, but mock always returns embedding.
+	if err := cache.Set("foo", "bar-text", "bar-value"); err != nil {
 		t.Fatalf("Failed to set cache entry: %v", err)
 	}
 
-	val, ok := cache.Lookup([]float32{0.1, 0.2}, 0.9)
-	if !ok || val != "bar" {
-		t.Errorf("Expected bar, got %v", val)
+	val, ok, err := cache.Lookup("bar-text", 0.9)
+	if err != nil {
+		t.Fatalf("Lookup error: %v", err)
+	}
+	if !ok || val != "bar-value" {
+		t.Errorf("Expected bar-value, got %v", val)
 	}
 }

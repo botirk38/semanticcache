@@ -8,36 +8,36 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 )
 
-// Embedding represents a semantic vector.
-type Embedding = []float32
-
-// Comparator defines a function to compute similarity between two embeddings.
-type Comparator func(a, b Embedding) float32
-
-// Entry holds an embedding and its associated response.
+// Entry holds an embedding and its associated value.
 type Entry struct {
-	Embedding Embedding
-	Response  any
+	Embedding []float32
+	Value     any
 }
 
-// Match represents a cache hit with its response and similarity score.
+// Match represents a cache hit with its value and similarity score.
 type Match struct {
-	Response any
-	Score    float32
+	Value any
+	Score float32
 }
 
-// SemanticCache is an in-memory semantic cache with LRU eviction.
+// SemanticCache is an in-memory semantic cache with LRU eviction and embedding-based lookup.
 type SemanticCache struct {
 	mu         sync.RWMutex
 	cache      *lru.Cache[string, Entry]
-	comparator Comparator
+	index      map[string][]float32 // key -> embedding, for brute force search
+	provider   EmbeddingProvider    // interface for embedding text
 	capacity   int
+	comparator func(a, b []float32) float32 // Similarity function
 }
 
-// New creates a SemanticCache with the given capacity and comparator function.
-func New(capacity int, comparator Comparator) (*SemanticCache, error) {
+// NewSemanticCache creates a SemanticCache with the given capacity and embedding provider.
+// comparator is optional; if nil, defaults to cosine similarity.
+func NewSemanticCache(capacity int, provider EmbeddingProvider, comparator func(a, b []float32) float32) (*SemanticCache, error) {
+	if provider == nil {
+		return nil, errors.New("embedding provider cannot be nil")
+	}
 	if comparator == nil {
-		return nil, errors.New("comparator function cannot be nil")
+		comparator = CosineSimilarity
 	}
 	lruCache, err := lru.New[string, Entry](capacity)
 	if err != nil {
@@ -45,28 +45,36 @@ func New(capacity int, comparator Comparator) (*SemanticCache, error) {
 	}
 	return &SemanticCache{
 		cache:      lruCache,
-		comparator: comparator,
+		index:      make(map[string][]float32),
+		provider:   provider,
 		capacity:   capacity,
+		comparator: comparator,
 	}, nil
 }
 
-// Set stores or updates the entry for key.
-func (sc *SemanticCache) Set(key string, embedding Embedding, response any) error {
+// Set stores or updates the entry for key with embedding computed from inputText.
+func (sc *SemanticCache) Set(key, inputText string, value any) error {
 	if key == "" {
 		return errors.New("key cannot be empty")
 	}
+	embedding, err := sc.provider.EmbedText(inputText)
+	if err != nil {
+		return err
+	}
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
-	sc.cache.Add(key, Entry{Embedding: embedding, Response: response})
+	entry := Entry{Embedding: embedding, Value: value}
+	sc.cache.Add(key, entry)
+	sc.index[key] = embedding
 	return nil
 }
 
-// Get retrieves the response for key, if present.
+// Get retrieves the value for key, if present.
 func (sc *SemanticCache) Get(key string) (any, bool) {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 	if entry, ok := sc.cache.Get(key); ok {
-		return entry.Response, true
+		return entry.Value, true
 	}
 	return nil, false
 }
@@ -83,6 +91,7 @@ func (sc *SemanticCache) Delete(key string) {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	sc.cache.Remove(key)
+	delete(sc.index, key)
 }
 
 // Flush clears all entries from the cache.
@@ -94,6 +103,7 @@ func (sc *SemanticCache) Flush() error {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	sc.cache = newCache
+	sc.index = make(map[string][]float32)
 	return nil
 }
 
@@ -104,49 +114,84 @@ func (sc *SemanticCache) Len() int {
 	return sc.cache.Len()
 }
 
-// Lookup returns the first response whose embedding similarity >= threshold.
-func (sc *SemanticCache) Lookup(embedding Embedding, threshold float32) (any, bool) {
-	sc.mu.RLock()
-	keys := sc.cache.Keys()
-	sc.mu.RUnlock()
+// Lookup returns the first value whose embedding similarity >= threshold.
+func (sc *SemanticCache) Lookup(inputText string, threshold float32) (any, bool, error) {
+	embedding, err := sc.provider.EmbedText(inputText)
+	if err != nil {
+		return nil, false, err
+	}
 
-	for _, key := range keys {
-		sc.mu.RLock()
-		entry, ok := sc.cache.Peek(key)
-		sc.mu.RUnlock()
-		if ok && sc.comparator(embedding, entry.Embedding) >= threshold {
-			sc.mu.Lock()
-			defer sc.mu.Unlock()
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+	for key, emb := range sc.index {
+		score := sc.comparator(embedding, emb)
+		if score >= threshold {
 			if entry, ok := sc.cache.Get(key); ok {
-				return entry.Response, true
+				return entry.Value, true, nil
 			}
 		}
 	}
-	return nil, false
+	return nil, false, nil
 }
 
 // TopMatches returns up to n matches sorted by descending similarity.
-func (sc *SemanticCache) TopMatches(embedding Embedding, n int) []Match {
-	sc.mu.RLock()
-	keys := sc.cache.Keys()
-	sc.mu.RUnlock()
-
-	matches := make([]Match, 0, len(keys))
-	for _, key := range keys {
-		sc.mu.RLock()
-		entry, ok := sc.cache.Peek(key)
-		sc.mu.RUnlock()
-		if ok {
-			score := sc.comparator(embedding, entry.Embedding)
-			matches = append(matches, Match{Response: entry.Response, Score: score})
-		}
+func (sc *SemanticCache) TopMatches(inputText string, n int) ([]Match, error) {
+	embedding, err := sc.provider.EmbedText(inputText)
+	if err != nil {
+		return nil, err
 	}
 
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+
+	matches := make([]Match, 0, len(sc.index))
+	for key, emb := range sc.index {
+		score := sc.comparator(embedding, emb)
+		if entry, ok := sc.cache.Get(key); ok {
+			matches = append(matches, Match{Value: entry.Value, Score: score})
+		}
+	}
 	sort.Slice(matches, func(i, j int) bool {
 		return matches[i].Score > matches[j].Score
 	})
 	if len(matches) > n {
-		return matches[:n]
+		return matches[:n], nil
 	}
-	return matches
+	return matches, nil
+}
+
+// Close frees resources used by the provider.
+func (sc *SemanticCache) Close() {
+	if sc.provider != nil {
+		sc.provider.Close()
+	}
+}
+
+// CosineSimilarity computes the cosine similarity between two float32 vectors.
+func CosineSimilarity(a, b []float32) float32 {
+	if len(a) != len(b) || len(a) == 0 {
+		return 0
+	}
+	var dot, normA, normB float32
+	for i := 0; i < len(a); i++ {
+		dot += a[i] * b[i]
+		normA += a[i] * a[i]
+		normB += b[i] * b[i]
+	}
+	if normA == 0 || normB == 0 {
+		return 0
+	}
+	return dot / (sqrt(normA) * sqrt(normB))
+}
+
+// sqrt returns the square root of a float32 (simple Newton's method).
+func sqrt(x float32) float32 {
+	if x == 0 {
+		return 0
+	}
+	z := x / 2
+	for i := 0; i < 8; i++ {
+		z -= (z*z - x) / (2 * z)
+	}
+	return z
 }
