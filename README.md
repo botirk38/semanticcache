@@ -1,4 +1,3 @@
-````markdown
 # semanticcache
 
 > An in-memory, similarity-aware LRU cache for semantically indexed data in Go.
@@ -22,7 +21,6 @@
 ```bash
 go get github.com/botirk38/semanticcache
 ```
-````
 
 ---
 
