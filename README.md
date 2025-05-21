@@ -1,131 +1,90 @@
 # semanticcache
+A Go library for caching semantic data using the LRU cache eviction policy.
 
-> An in-memory, similarity-aware LRU cache for semantically indexed data in Go.
+## Project Overview
+The semanticcache package is designed to provide a caching mechanism for semantic data. It leverages the LRU (Least Recently Used) cache eviction policy to optimize performance and scalability. The package is written in Go and utilizes the `github.com/hashicorp/golang-lru/v2` library for cache implementation.
 
-`semanticcache` is a Go library that enables fast semantic search with pluggable embedding support. It stores vectors (embeddings) and associated responses, allowing efficient nearest-neighbor lookups using any similarity function.
+## Key Features
+* **Semantic Caching**: The package provides a caching mechanism for semantic data, allowing for efficient storage and retrieval of data.
+* **LRU Cache Eviction**: The package uses the LRU cache eviction policy to ensure that the most recently used data is retained in the cache.
+* **Customizable Capacity**: The package allows users to specify the capacity of the cache, enabling them to balance memory usage and performance.
+* **Comparator Interface**: The package provides a comparator interface that allows users to define custom comparison logic for cache entries.
 
----
+## Getting Started
+To get started with the semanticcache package, follow these steps:
 
-## 🚀 Features
+### Prerequisites
+* **Go**: The package is written in Go and requires a Go environment to build and run.
+* **github.com/hashicorp/golang-lru/v2**: The package depends on the `github.com/hashicorp/golang-lru/v2` library for cache implementation.
 
-- 🔁 **LRU eviction policy** using [hashicorp/golang-lru](https://github.com/hashicorp/golang-lru)
-- 🔍 **Semantic search support** via cosine or custom similarity
-- ⚡ **Concurrent safe** with read/write locks
-- 🔌 **Plug-and-play**: works with any embedding generator (OpenAI, Groq, etc.)
-- 🧪 **Tested**, **minimal**, and **modular**
-
----
-
-## 📦 Installation
-
-```bash
+### Installation
+To install the semanticcache package, run the following command:
+```go
 go get github.com/botirk38/semanticcache
 ```
 
----
-
-## ✨ Usage Example
-
+## Usage
+The semanticcache package provides a simple API for caching semantic data. Here's an example of how to use the package:
 ```go
 package main
 
 import (
- "fmt"
- "log"
-
- "github.com/botirk38/semanticcache"
+	"github.com/botirk38/semanticcache"
 )
 
-func cosineSimilarity(a, b []float32) float32 {
- var dot, normA, normB float32
- for i := range a {
-  dot += a[i] * b[i]
-  normA += a[i] * a[i]
-  normB += b[i] * b[i]
- }
- if normA == 0 || normB == 0 {
-  return 0
- }
- return dot / (sqrt(normA) * sqrt(normB))
-}
-
-func sqrt(x float32) float32 {
- z := x
- for i := 0; i < 10; i++ {
-  z -= (z*z - x) / (2 * z)
- }
- return z
-}
-
 func main() {
- cache, err := semanticcache.New(100, cosineSimilarity)
- if err != nil {
-  log.Fatal(err)
- }
+	// Create a new semantic cache with a capacity of 100
+	cache, err := semanticcache.New(100, nil)
+	if err != nil {
+		// Handle error
+	}
 
- embedding := []float32{0.1, 0.2, 0.3}
- cache.Set("hello", embedding, "world")
+	// Add an entry to the cache
+	cache.Add("key", "value")
 
- query := []float32{0.1, 0.2, 0.3}
- resp, found := cache.Lookup(query, 0.95)
- if found {
-  fmt.Println("Found:", resp)
- } else {
-  fmt.Println("No match found.")
- }
+	// Retrieve an entry from the cache
+	value, ok := cache.Get("key")
+	if ok {
+		// Handle retrieved value
+	}
 }
 ```
 
----
+## Architecture Overview
+The semanticcache package consists of the following components:
 
-## 🧠 API
+* **SemanticCache**: The main cache struct that provides methods for adding, retrieving, and removing cache entries.
+* **Entry**: A struct that represents a cache entry, containing the key, value, and other metadata.
+* **Comparator**: An interface that allows users to define custom comparison logic for cache entries.
 
-### `New(capacity int, comparator Comparator) (*SemanticCache, error)`
+## Configuration
+The semanticcache package provides several configuration options, including:
 
-Creates a new cache with the given size and similarity function.
+* **Capacity**: The maximum number of entries that the cache can hold.
+* **Comparator**: A custom comparison function that can be used to compare cache entries.
 
-### `Set(key string, embedding []float32, response any) error`
+## Contributing Guidelines
+To contribute to the semanticcache package, follow these steps:
 
-Inserts a key, embedding, and response.
+1. Fork the repository.
+2. Create a new branch for your changes.
+3. Commit your changes with a descriptive commit message.
+4. Open a pull request against the main branch.
 
-### `Lookup(embedding []float32, threshold float32) (any, bool)`
+## License
+The semanticcache package is licensed under the MIT License. See the LICENSE file for more information.
 
-Searches for the first item with similarity ≥ `threshold`.
+## Dependencies
+The semanticcache package depends on the following libraries:
 
-### `TopMatches(embedding []float32, n int) []Match`
+* **github.com/hashicorp/golang-lru/v2**: The LRU cache implementation.
 
-Returns top `n` most similar items.
+## Compatibility
+The semanticcache package is compatible with Go version 1.17 and later. It is recommended to use the latest version of Go for optimal performance and security.
 
-### `Delete(key string)`, `Flush()`, `Get(key string)`, `Contains(key string)`, `Len()`
-
-Standard cache operations.
-
----
-
-## 🧪 Testing
-
-Run unit tests:
-
+## Testing
+The semanticcache package includes a test suite that covers the main functionality of the package. To run the tests, use the following command:
 ```bash
-go test ./...
+go test -v
 ```
-
----
-
-## 📁 Project Structure
-
-```
-semanticcache/
-├── semanticcache/        # Main library code
-│   └── cache.go
-├── examples/             # Optional usage demos
-│   └── basic/main.go
-├── test/                 # Tests
-│   └── cache_test.go
-```
-
----
-
-## 📄 License
-
-MIT © [Botir Khaltaev](https://github.com/botirk38)
+Note: The test suite is still under development and may not cover all edge cases. Contributions to the test suite are welcome.
