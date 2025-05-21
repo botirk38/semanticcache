@@ -3,7 +3,7 @@ package semanticcache_test
 import (
 	"testing"
 
-	"github.com/botirk38/semanticcache/semanticcache"
+	"github.com/botirk38/semanticcache"
 )
 
 // Mock provider always returns the given "embedding" for a text.
