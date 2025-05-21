@@ -173,7 +173,7 @@ func CosineSimilarity(a, b []float32) float32 {
 		return 0
 	}
 	var dot, normA, normB float32
-	for i := 0; i < len(a); i++ {
+	for i := range a {
 		dot += a[i] * b[i]
 		normA += a[i] * a[i]
 		normB += b[i] * b[i]
@@ -190,7 +190,7 @@ func sqrt(x float32) float32 {
 		return 0
 	}
 	z := x / 2
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		z -= (z*z - x) / (2 * z)
 	}
 	return z

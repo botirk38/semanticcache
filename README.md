@@ -1,90 +1,207 @@
 # semanticcache
-A Go library for caching semantic data using the LRU cache eviction policy.
+
+A Go library for **semantic caching** with LRU eviction, supporting vector-based similarity search with pluggable embedding backends (local or cloud).
+Useful for AI, retrieval-augmented generation, chatbot memory, and any workload where you want to cache by semantic similarity—not just string keys.
+
+---
 
 ## Project Overview
-The semanticcache package is designed to provide a caching mechanism for semantic data. It leverages the LRU (Least Recently Used) cache eviction policy to optimize performance and scalability. The package is written in Go and utilizes the `github.com/hashicorp/golang-lru/v2` library for cache implementation.
+
+`semanticcache` is a pluggable semantic cache for Go.
+It lets you cache arbitrary values indexed by **embeddings** (vector representations of text, etc.), using the [Least Recently Used (LRU)](https://en.wikipedia.org/wiki/Cache_replacement_policies#Least_recently_used_%28LRU%29) cache eviction policy for scalability.
+Supports both **local embedding models** (via [kelindar/search](https://github.com/kelindar/search)) and **OpenAI Embedding API**.
+
+---
 
 ## Key Features
-* **Semantic Caching**: The package provides a caching mechanism for semantic data, allowing for efficient storage and retrieval of data.
-* **LRU Cache Eviction**: The package uses the LRU cache eviction policy to ensure that the most recently used data is retained in the cache.
-* **Customizable Capacity**: The package allows users to specify the capacity of the cache, enabling them to balance memory usage and performance.
-* **Comparator Interface**: The package provides a comparator interface that allows users to define custom comparison logic for cache entries.
 
-## Getting Started
-To get started with the semanticcache package, follow these steps:
+- **Semantic Cache:** Store and retrieve values by semantic similarity, not just by string key.
+- **LRU Eviction:** Keeps cache memory usage bounded, evicts least recently used items.
+- **Pluggable Embedding Providers:** Use local models (fast, private) or OpenAI (no local install).
+- **Fast Similarity Search:** Lookup or rank by vector similarity (defaults to cosine).
+- **Customizable Capacity:** Choose your cache size for your workload.
+- **Custom Similarity:** Use your own similarity function if needed.
 
-### Prerequisites
-* **Go**: The package is written in Go and requires a Go environment to build and run.
-* **github.com/hashicorp/golang-lru/v2**: The package depends on the `github.com/hashicorp/golang-lru/v2` library for cache implementation.
+---
 
-### Installation
-To install the semanticcache package, run the following command:
-```go
+## Installation
+
+```sh
 go get github.com/botirk38/semanticcache
 ```
 
-## Usage
-The semanticcache package provides a simple API for caching semantic data. Here's an example of how to use the package:
-```go
-package main
+---
 
+## Embedding Provider Requirements
+
+- For **local embedding**, you need the `libllama_go.so` shared library built and available (see [kelindar/search docs](https://github.com/kelindar/search#compile-library)).
+- For **OpenAI provider**, set the `OPENAI_API_KEY` environment variable.
+
+---
+
+## Usage
+
+### 1. Choose your provider
+
+#### **Local Embedding Provider**
+
+```go
 import (
-	"github.com/botirk38/semanticcache"
+    "github.com/botirk38/semanticcache/semanticcache"
 )
 
-func main() {
-	// Create a new semantic cache with a capacity of 100
-	cache, err := semanticcache.New(100, nil)
-	if err != nil {
-		// Handle error
-	}
+provider, err := semanticcache.NewLocalProvider("", 0) // (modelPath, gpuLayers)
+if err != nil {
+    panic(err)
+}
+defer provider.Close()
+```
 
-	// Add an entry to the cache
-	cache.Add("key", "value")
+#### **OpenAI Embedding Provider**
 
-	// Retrieve an entry from the cache
-	value, ok := cache.Get("key")
-	if ok {
-		// Handle retrieved value
-	}
+```go
+provider, err := semanticcache.NewOpenAIProvider("", "") // (apiKey, model)
+if err != nil {
+    panic(err)
+}
+defer provider.Close()
+```
+
+---
+
+### 2. Create your cache
+
+```go
+cache, err := semanticcache.NewSemanticCache(1000, provider, nil) // (capacity, provider, comparator)
+if err != nil {
+    panic(err)
+}
+defer cache.Close()
+```
+
+- Pass your own comparator for custom similarity, or use `nil` for cosine similarity.
+
+---
+
+### 3. Add entries to the cache
+
+```go
+// The Set method takes a unique key, the text to embed, and your value.
+err := cache.Set("unique-key", "What is the capital of France?", "Paris")
+if err != nil {
+    panic(err)
 }
 ```
 
-## Architecture Overview
-The semanticcache package consists of the following components:
+---
 
-* **SemanticCache**: The main cache struct that provides methods for adding, retrieving, and removing cache entries.
-* **Entry**: A struct that represents a cache entry, containing the key, value, and other metadata.
-* **Comparator**: An interface that allows users to define custom comparison logic for cache entries.
+### 4. Retrieve by semantic similarity
 
-## Configuration
-The semanticcache package provides several configuration options, including:
+#### Exact key
 
-* **Capacity**: The maximum number of entries that the cache can hold.
-* **Comparator**: A custom comparison function that can be used to compare cache entries.
+```go
+value, ok := cache.Get("unique-key")
+if ok {
+    // do something with value
+}
+```
 
-## Contributing Guidelines
-To contribute to the semanticcache package, follow these steps:
+#### Semantic lookup
 
-1. Fork the repository.
-2. Create a new branch for your changes.
-3. Commit your changes with a descriptive commit message.
-4. Open a pull request against the main branch.
+```go
+value, ok, err := cache.Lookup("Which city is France's capital?", 0.8)
+if err != nil {
+    panic(err)
+}
+if ok {
+    // value is the closest matching cached value above threshold
+}
+```
 
-## License
-The semanticcache package is licensed under the MIT License. See the LICENSE file for more information.
+#### Top N matches
 
-## Dependencies
-The semanticcache package depends on the following libraries:
+```go
+matches, err := cache.TopMatches("french capital", 3)
+if err != nil {
+    panic(err)
+}
+for _, m := range matches {
+    // m.Value and m.Score
+}
+```
 
-* **github.com/hashicorp/golang-lru/v2**: The LRU cache implementation.
+---
 
-## Compatibility
-The semanticcache package is compatible with Go version 1.17 and later. It is recommended to use the latest version of Go for optimal performance and security.
+## API Overview
+
+**Types:**
+
+- `SemanticCache`: The main cache struct.
+- `Entry`: Holds the embedding and value.
+- `Match`: A value and similarity score for ranked results.
+- `EmbeddingProvider`: Interface for embedding backends.
+
+**Key Methods:**
+
+- `Set(key string, text string, value any) error`
+- `Get(key string) (any, bool)`
+- `Lookup(text string, threshold float32) (any, bool, error)`
+- `TopMatches(text string, n int) ([]Match, error)`
+- `Flush() error`
+- `Len() int`
+- `Close()`
+
+---
+
+## Architecture
+
+- **SemanticCache**: Handles LRU cache, in-memory embedding index, and similarity logic.
+- **Providers**: Pluggable, implement `EmbeddingProvider` interface (`EmbedText(text string) ([]float32, error)`).
+- **Comparator**: Any function of type `func(a, b []float32) float32` (cosine by default).
+
+---
 
 ## Testing
-The semanticcache package includes a test suite that covers the main functionality of the package. To run the tests, use the following command:
-```bash
-go test -v
+
+Run:
+
+```sh
+go test -v ./...
 ```
-Note: The test suite is still under development and may not cover all edge cases. Contributions to the test suite are welcome.
+
+To run tests that require local embedding, ensure you have `libllama_go.so` installed and available.
+
+---
+
+## Contributing
+
+1. Fork the repository.
+2. Create a new branch for your feature or bugfix.
+3. Write tests and make your changes.
+4. Open a pull request!
+
+---
+
+## License
+
+MIT License – see LICENSE file.
+
+---
+
+## Dependencies
+
+- [github.com/hashicorp/golang-lru/v2](https://github.com/hashicorp/golang-lru) – LRU cache
+- [github.com/kelindar/search](https://github.com/kelindar/search) – (optional) local vector search/embedding
+- [github.com/openai/openai-go](https://github.com/openai/openai-go) – (optional) OpenAI embedding provider
+
+---
+
+## Compatibility
+
+- Requires Go 1.18 or newer.
+- Supports Linux, macOS, Windows (embedding provider support may vary).
+
+---
+
+**Questions?** Open an issue or discussion on GitHub!
+**Need an install script or provider for Cohere/Gemini? PRs welcome!**
