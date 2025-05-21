@@ -129,7 +129,3 @@ semanticcache/
 ## 📄 License
 
 MIT © [Botir Khaltaev](https://github.com/botirk38)
-
-```
-
-```
