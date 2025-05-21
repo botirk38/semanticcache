@@ -18,7 +18,8 @@ func cosine(a, b []float32) float32 {
 
 func sqrt(x float32) float32 {
 	z := x
-	for range 10 {
+	loop_end := 10
+	for range loop_end {
 		z -= (z*z - x) / (2 * z)
 	}
 	return z
