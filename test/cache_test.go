@@ -38,7 +38,7 @@ func sqrt(x float32) float32 {
 func TestLookup(t *testing.T) {
 	embedding := []float32{0.1, 0.2}
 	provider := &mockProvider{embedding: embedding}
-	cache, err := semanticcache.NewSemanticCache(10, provider, cosine)
+	cache, err := semanticcache.NewSemanticCache[string](10, provider, cosine)
 	if err != nil {
 		t.Fatalf("Failed to create cache: %v", err)
 	}

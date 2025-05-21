@@ -72,7 +72,7 @@ defer provider.Close()
 ### 2. Create your cache
 
 ```go
-cache, err := semanticcache.NewSemanticCache(1000, provider, nil) // (capacity, provider, comparator)
+cache, err := semanticcache.NewSemanticCache[string](1000, provider, nil) // (capacity, provider, comparator)
 if err != nil {
     panic(err)
 }
