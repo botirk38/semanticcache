@@ -2,11 +2,14 @@ package remote
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/botirk38/semanticcache/types"
@@ -29,13 +32,66 @@ type redisDocument[V any] struct {
 	Timestamp int64     `json:"timestamp"`
 }
 
+// parseRedisURL parses a Redis URL and returns redis.Options
+func parseRedisURL(connectionString string) (*redis.Options, error) {
+	// Handle redis:// or rediss:// URLs
+	if strings.HasPrefix(connectionString, "redis://") || strings.HasPrefix(connectionString, "rediss://") {
+		parsedURL, err := url.Parse(connectionString)
+		if err != nil {
+			return nil, fmt.Errorf("invalid Redis URL: %w", err)
+		}
+
+		opts := &redis.Options{
+			Addr: parsedURL.Host,
+		}
+
+		// Handle TLS
+		if parsedURL.Scheme == "rediss" {
+			opts.TLSConfig = &tls.Config{}
+		}
+
+		// Extract username and password
+		if parsedURL.User != nil {
+			opts.Username = parsedURL.User.Username()
+			if password, ok := parsedURL.User.Password(); ok {
+				opts.Password = password
+			}
+		}
+
+		// Extract database number from path
+		if parsedURL.Path != "" && parsedURL.Path != "/" {
+			dbStr := strings.TrimPrefix(parsedURL.Path, "/")
+			if db, err := strconv.Atoi(dbStr); err == nil {
+				opts.DB = db
+			}
+		}
+
+		return opts, nil
+	}
+
+	// For simple address format (host:port), return minimal options
+	return &redis.Options{
+		Addr: connectionString,
+	}, nil
+}
+
 // NewRedisBackend creates a new Redis backend
 func NewRedisBackend[K comparable, V any](config types.BackendConfig) (*RedisBackend[K, V], error) {
-	opts := &redis.Options{
-		Addr:     config.ConnectionString,
-		Username: config.Username,
-		Password: config.Password,
-		DB:       config.Database,
+	// Parse connection string (supports both URLs and simple addresses)
+	opts, err := parseRedisURL(config.ConnectionString)
+	if err != nil {
+		return nil, err
+	}
+
+	// Override with explicit config values if provided
+	if config.Username != "" {
+		opts.Username = config.Username
+	}
+	if config.Password != "" {
+		opts.Password = config.Password
+	}
+	if config.Database != 0 {
+		opts.DB = config.Database
 	}
 
 	client := redis.NewClient(opts)
