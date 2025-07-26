@@ -47,7 +47,9 @@ func parseRedisURL(connectionString string) (*redis.Options, error) {
 
 		// Handle TLS
 		if parsedURL.Scheme == "rediss" {
-			opts.TLSConfig = &tls.Config{}
+			opts.TLSConfig = &tls.Config{
+				MinVersion: tls.VersionTLS12,
+			}
 		}
 
 		// Extract username and password
