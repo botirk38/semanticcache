@@ -31,10 +31,31 @@ jobs:
       - name: Build
         run: go build -v ./...
 
+  gofmt:
+    name: Format Check
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "The following files are not properly formatted:"
+            echo "$unformatted"
+            echo ""
+            echo "Please run 'gofmt -w .' to fix formatting issues."
+            exit 1
+          fi
+          echo "All files are properly formatted."
+
   golangci:
     name: Lint
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, gofmt]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -48,7 +69,7 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    needs: [build, golangci]
+    needs: [build, gofmt, golangci]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

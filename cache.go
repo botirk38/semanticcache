@@ -1,11 +1,11 @@
 package semanticcache
 
 import (
+	"context"
 	"errors"
 	"sort"
-	"sync"
 
-	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/botirk38/semanticcache/types"
 )
 
 // Entry holds an embedding and its associated value.
@@ -20,49 +20,34 @@ type Match[V any] struct {
 	Score float32
 }
 
-// SemanticCache is an in-memory semantic cache with LRU eviction and embedding-based lookup.
+// SemanticCache is a semantic cache with pluggable backends and embedding-based lookup.
 type SemanticCache[K comparable, V any] struct {
-	mu         *sync.RWMutex
-	cache      *lru.Cache[K, Entry[V]]
-	index      map[K][]float32
-	provider   EmbeddingProvider
-	capacity   int
+	backend    types.CacheBackend[K, V]
+	provider   types.EmbeddingProvider
 	comparator func(a, b []float32) float32
 }
 
-// NewSemanticCache creates a SemanticCache with the given capacity and embedding provider.
+// NewSemanticCache creates a SemanticCache with the given backend and embedding provider.
 // comparator is optional; if nil, defaults to cosine similarity.
 func NewSemanticCache[K comparable, V any](
-	capacity int,
-	provider EmbeddingProvider,
+	backend types.CacheBackend[K, V],
+	provider types.EmbeddingProvider,
 	comparator func(a, b []float32) float32,
 ) (*SemanticCache[K, V], error) {
+	if backend == nil {
+		return nil, errors.New("backend cannot be nil")
+	}
 	if provider == nil {
 		return nil, errors.New("embedding provider cannot be nil")
 	}
 	if comparator == nil {
 		comparator = CosineSimilarity
 	}
-	index := make(map[K][]float32)
-	mu := &sync.RWMutex{}
-
-	// Set up the eviction callback at construction using NewWithEvict
-	lruCache, err := lru.NewWithEvict(capacity, func(key K, _ Entry[V]) {
-		mu.Lock()
-		defer mu.Unlock()
-		delete(index, key)
-	})
-	if err != nil {
-		return nil, err
-	}
 
 	sc := &SemanticCache[K, V]{
-		cache:      lruCache,
-		index:      index,
+		backend:    backend,
 		provider:   provider,
-		capacity:   capacity,
 		comparator: comparator,
-		mu:         mu,
 	}
 
 	return sc, nil
@@ -77,63 +62,43 @@ func (sc *SemanticCache[K, V]) Set(key K, inputText string, value V) error {
 	if err != nil {
 		return err
 	}
-	sc.mu.Lock()
-	defer sc.mu.Unlock()
-	entry := Entry[V]{Embedding: embedding, Value: value}
-	sc.cache.Add(key, entry)
-	sc.index[key] = embedding
-	return nil
+	entry := types.Entry[V]{Embedding: embedding, Value: value}
+	return sc.backend.Set(context.Background(), key, entry)
 }
 
 // Get retrieves the value for key, if present.
 func (sc *SemanticCache[K, V]) Get(key K) (V, bool) {
-	sc.mu.RLock()
-	defer sc.mu.RUnlock()
-	if entry, ok := sc.cache.Get(key); ok {
-		return entry.Value, true
+	entry, found, err := sc.backend.Get(context.Background(), key)
+	if err != nil || !found {
+		var zero V
+		return zero, false
 	}
-	var zero V
-	return zero, false
+	return entry.Value, true
 }
 
 // Contains checks for key presence without affecting recency.
 func (sc *SemanticCache[K, V]) Contains(key K) bool {
-	sc.mu.RLock()
-	defer sc.mu.RUnlock()
-	return sc.cache.Contains(key)
+	exists, err := sc.backend.Contains(context.Background(), key)
+	return err == nil && exists
 }
 
 // Delete removes the entry for key.
 func (sc *SemanticCache[K, V]) Delete(key K) {
-	sc.mu.Lock()
-	defer sc.mu.Unlock()
-	sc.cache.Remove(key)
-	// index cleanup handled by eviction callback
+	_ = sc.backend.Delete(context.Background(), key)
 }
 
 // Flush clears all entries from the cache and the index.
 func (sc *SemanticCache[K, V]) Flush() error {
-	// Create a new cache with the same eviction callback
-	newCache, err := lru.NewWithEvict(sc.capacity, func(key K, _ Entry[V]) {
-		sc.mu.Lock()
-		defer sc.mu.Unlock()
-		delete(sc.index, key)
-	})
-	if err != nil {
-		return err
-	}
-	sc.mu.Lock()
-	defer sc.mu.Unlock()
-	sc.cache = newCache
-	sc.index = make(map[K][]float32)
-	return nil
+	return sc.backend.Flush(context.Background())
 }
 
 // Len returns the number of items in the cache.
 func (sc *SemanticCache[K, V]) Len() int {
-	sc.mu.RLock()
-	defer sc.mu.RUnlock()
-	return sc.cache.Len()
+	count, err := sc.backend.Len(context.Background())
+	if err != nil {
+		return 0
+	}
+	return count
 }
 
 // Lookup returns the first value whose embedding similarity >= threshold.
@@ -144,12 +109,22 @@ func (sc *SemanticCache[K, V]) Lookup(inputText string, threshold float32) (V, b
 		return zero, false, err
 	}
 
-	sc.mu.RLock()
-	defer sc.mu.RUnlock()
-	for key, emb := range sc.index {
+	keys, err := sc.backend.Keys(context.Background())
+	if err != nil {
+		var zero V
+		return zero, false, err
+	}
+
+	for _, key := range keys {
+		emb, found, err := sc.backend.GetEmbedding(context.Background(), key)
+		if err != nil || !found {
+			continue
+		}
+
 		score := sc.comparator(embedding, emb)
 		if score >= threshold {
-			if entry, ok := sc.cache.Get(key); ok {
+			entry, found, err := sc.backend.Get(context.Background(), key)
+			if err == nil && found {
 				return entry.Value, true, nil
 			}
 		}
@@ -165,13 +140,21 @@ func (sc *SemanticCache[K, V]) TopMatches(inputText string, n int) ([]Match[V], 
 		return nil, err
 	}
 
-	sc.mu.RLock()
-	defer sc.mu.RUnlock()
+	keys, err := sc.backend.Keys(context.Background())
+	if err != nil {
+		return nil, err
+	}
 
-	matches := make([]Match[V], 0, len(sc.index))
-	for key, emb := range sc.index {
+	matches := make([]Match[V], 0, len(keys))
+	for _, key := range keys {
+		emb, found, err := sc.backend.GetEmbedding(context.Background(), key)
+		if err != nil || !found {
+			continue
+		}
+
 		score := sc.comparator(embedding, emb)
-		if entry, ok := sc.cache.Get(key); ok {
+		entry, found, err := sc.backend.Get(context.Background(), key)
+		if err == nil && found {
 			matches = append(matches, Match[V]{Value: entry.Value, Score: score})
 		}
 	}
@@ -184,10 +167,13 @@ func (sc *SemanticCache[K, V]) TopMatches(inputText string, n int) ([]Match[V], 
 	return matches, nil
 }
 
-// Close frees resources used by the provider.
+// Close frees resources used by the provider and backend.
 func (sc *SemanticCache[K, V]) Close() {
 	if sc.provider != nil {
 		sc.provider.Close()
+	}
+	if sc.backend != nil {
+		_ = sc.backend.Close()
 	}
 }
 
