@@ -1,0 +1,12 @@
+# Global code owner for the repository
+* @botirk38
+
+# Go module files
+go.mod @botirk38
+go.sum @botirk38
+
+# GitHub Actions workflows
+/.github/ @botirk38
+
+# Protect the CODEOWNERS file itself
+/.github/CODEOWNERS @botirk38
