@@ -8,9 +8,7 @@ import (
 	"github.com/botirk38/semanticcache/types"
 )
 
-var (
-	ErrUnsupportedBackend = errors.New("unsupported backend type")
-)
+var ErrUnsupportedBackend = errors.New("unsupported backend type")
 
 // BackendFactory creates cache backends based on type and configuration
 type BackendFactory[K comparable, V any] struct{}

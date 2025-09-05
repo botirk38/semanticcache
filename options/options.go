@@ -40,10 +40,10 @@ func (c *Config[K, V]) Apply(opts ...Option[K, V]) error {
 // Validate checks if the configuration is valid
 func (c *Config[K, V]) Validate() error {
 	if c.Backend == nil {
-		return errors.New("backend is required - use WithLRUBackend, WithRedisBackend, etc.")
+		return errors.New("backend is required - use WithLRUBackend, WithRedisBackend, etc")
 	}
 	if c.Provider == nil {
-		return errors.New("embedding provider is required - use WithOpenAIProvider, etc.")
+		return errors.New("embedding provider is required - use WithOpenAIProvider, etc")
 	}
 	return nil
 }
