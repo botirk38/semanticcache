@@ -1,97 +1,264 @@
-# SemanticCache
+# Semantic Cache
 
-A Go library for semantic caching that stores and retrieves values by meaning, not just exact string matches. Perfect for AI applications, chatbots, and retrieval-augmented generation.
-
-## Quick Start
-
-```sh
-go get github.com/botirk38/semanticcache
-```
-
-```go
-import (
-    "github.com/botirk38/semanticcache"
-    "github.com/botirk38/semanticcache/backends"
-    "github.com/botirk38/semanticcache/providers/openai"
-    "github.com/botirk38/semanticcache/types"
-)
-
-// 1. Create backend and provider
-backend, _ := backends.NewLRUBackend[string, string](1000)
-provider, _ := openai.NewOpenAIProvider(openai.OpenAIConfig{
-    APIKey: "your-openai-key",
-    Model:  "text-embedding-3-small",
-})
-
-// 2. Create cache
-cache, _ := semanticcache.NewSemanticCache(backend, provider, nil)
-defer cache.Close()
-
-// 3. Use semantic caching
-cache.Set("q1", "What is the capital of France?", "Paris")
-
-// Find similar questions
-value, found, _ := cache.Lookup("French capital city?", 0.8)
-if found {
-    fmt.Println(value) // "Paris"
-}
-```
+A high-performance semantic caching library for Go that uses vector embeddings to find semantically similar content. Perfect for LLM applications, search systems, and any use case where semantic similarity matters.
 
 ## Features
 
-- **Semantic Search**: Find cached values by meaning, not exact keys
-- **Multiple Backends**: In-memory (LRU/FIFO/LFU) and Redis support  
-- **OpenAI Integration**: Built-in support for OpenAI embeddings
-- **Type Safe**: Full generics support for keys and values
-- **Pluggable**: Easy to extend with new backends and embedding providers
+- 🚀 **Multiple Backend Support**: In-memory (LRU, LFU, FIFO) and Redis
+- 🤖 **OpenAI Integration**: Built-in support for OpenAI's embedding models
+- 🎯 **Semantic Search**: Find similar content using vector similarity
+- ⚡ **High Performance**: Optimized similarity algorithms
+- 🛠️ **Extensible**: Pluggable backends and embedding providers
+- 📦 **Type Safe**: Full generic support for any key/value types
+- 🔄 **Context Aware**: Built-in context support for all operations
+- 📊 **Batch Operations**: Efficient bulk operations
 
-## Backends
-
-Choose from multiple storage options:
+## Quick Start
 
 ```go
-// In-memory LRU cache (fastest)
-backend, _ := backends.NewLRUBackend[string, string](1000)
+package main
 
-// Redis backend (persistent)
-config := types.BackendConfig{
-    ConnectionString: "localhost:6379",
-    Database: 0,
+import (
+    "context"
+    "fmt"
+    "log"
+    
+    "github.com/botirkhaltaev/semanticcache"
+    "github.com/botirkhaltaev/semanticcache/options"
+    "github.com/botirkhaltaev/semanticcache/similarity"
+)
+
+func main() {
+    // Create a semantic cache with functional options
+    cache, err := semanticcache.New[string, string](
+        options.WithOpenAIProvider("your-api-key"),
+        options.WithLRUBackend(1000), // 1000 items capacity
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer cache.Close()
+
+    ctx := context.Background()
+
+    // Store some data
+    cache.Set(ctx, "user1", "The weather is sunny today", "Great day for outdoor activities")
+    cache.Set(ctx, "user2", "It's raining heavily outside", "Perfect day to stay indoors")
+
+    // Find semantically similar content
+    match, err := cache.Lookup(ctx, "Nice weather outdoors", 0.8)
+    if err != nil {
+        log.Fatal(err)
+    }
+    if match != nil {
+        fmt.Printf("Found similar content: %s (score: %.2f)\n", match.Value, match.Score)
+    }
+
+    // Get top similar matches
+    matches, err := cache.TopMatches(ctx, "rainy day inside", 3)
+    if err != nil {
+        log.Fatal(err)
+    }
+    for _, match := range matches {
+        fmt.Printf("Match: %s (score: %.2f)\n", match.Value, match.Score)
+    }
 }
-factory := &backends.BackendFactory[string, string]{}
-backend, _ := factory.NewBackend(types.BackendRedis, config)
 ```
 
-## API
-
-```go
-// Store with semantic text
-cache.Set("key1", "What is the capital of France?", "Paris")
-
-// Get by exact key
-value, found := cache.Get("key1")
-
-// Find by semantic similarity
-value, found, _ := cache.Lookup("French capital?", 0.8)
-
-// Get top matches ranked by similarity
-matches, _ := cache.TopMatches("European capitals", 5)
-```
-
-## Development
+## Installation
 
 ```bash
-# Run tests
-go test -v ./...
-
-# Run benchmarks  
-go test -v ./tests/benchmarks -bench=.
+go get github.com/botirk38/semanticcache
 ```
+
+## Configuration Options
+
+### Backend Options
+
+```go
+// In-memory backends
+options.WithLRUBackend(capacity)    // Least Recently Used
+options.WithLFUBackend(capacity)    // Least Frequently Used  
+options.WithFIFOBackend(capacity)   // First In, First Out
+
+// Redis backend
+options.WithRedisBackend("localhost:6379", 0) // addr, db
+
+// Custom backend
+options.WithCustomBackend(yourBackend)
+```
+
+### Embedding Provider Options
+
+```go
+// OpenAI (with optional model specification)
+options.WithOpenAIProvider("api-key")
+options.WithOpenAIProvider("api-key", "text-embedding-3-large")
+
+// Custom provider
+options.WithCustomProvider(yourProvider)
+```
+
+### Similarity Functions
+
+```go
+// Built-in similarity functions
+options.WithSimilarityComparator(similarity.CosineSimilarity)        // Default
+options.WithSimilarityComparator(similarity.EuclideanSimilarity)
+options.WithSimilarityComparator(similarity.DotProductSimilarity)
+options.WithSimilarityComparator(similarity.ManhattanSimilarity)
+options.WithSimilarityComparator(similarity.PearsonCorrelationSimilarity)
+
+// Custom similarity function
+options.WithSimilarityComparator(func(a, b []float32) float32 {
+    // Your custom similarity logic
+    return similarity
+})
+```
+
+## API Reference
+
+### Core Operations
+
+```go
+// Basic CRUD operations
+err := cache.Set(ctx, key, inputText, value)
+value, found, err := cache.Get(ctx, key)
+exists, err := cache.Contains(ctx, key)
+err := cache.Delete(ctx, key)
+
+// Cache management
+err := cache.Flush(ctx)           // Clear all entries
+count, err := cache.Len(ctx)      // Get cache size
+err := cache.Close()              // Close resources
+```
+
+### Semantic Search
+
+```go
+// Find first match above threshold
+match, err := cache.Lookup(ctx, "search text", 0.8)
+if match != nil {
+    fmt.Printf("Found: %v (score: %.2f)\n", match.Value, match.Score)
+}
+
+// Get top N matches
+matches, err := cache.TopMatches(ctx, "search text", 5)
+for _, match := range matches {
+    fmt.Printf("Match: %v (score: %.2f)\n", match.Value, match.Score)
+}
+```
+
+### Batch Operations
+
+```go
+// Batch set
+items := []semanticcache.BatchItem[string, string]{
+    {Key: "key1", InputText: "text1", Value: "value1"},
+    {Key: "key2", InputText: "text2", Value: "value2"},
+}
+err := cache.SetBatch(ctx, items)
+
+// Batch get
+values, err := cache.GetBatch(ctx, []string{"key1", "key2"})
+
+// Batch delete
+err := cache.DeleteBatch(ctx, []string{"key1", "key2"})
+```
+
+## Advanced Usage
+
+### Custom Embedding Provider
+
+```go
+type MyProvider struct{}
+
+func (p *MyProvider) EmbedText(text string) ([]float32, error) {
+    // Your embedding logic
+    return embedding, nil
+}
+
+func (p *MyProvider) Close() {}
+
+// Use with cache
+cache, err := semanticcache.New[string, string](
+    options.WithCustomProvider(&MyProvider{}),
+    options.WithLRUBackend(1000),
+)
+```
+
+### Custom Backend
+
+```go
+type MyBackend struct{}
+
+func (b *MyBackend) Set(ctx context.Context, key string, entry types.Entry[string]) error {
+    // Your storage logic
+    return nil
+}
+
+// Implement other required methods...
+
+// Use with cache
+cache, err := semanticcache.New[string, string](
+    options.WithOpenAIProvider("api-key"),
+    options.WithCustomBackend(&MyBackend{}),
+)
+```
+
+### Redis Configuration
+
+For Redis backend with JSON support (RedisJSON module):
+
+```go
+cache, err := semanticcache.New[string, MyStruct](
+    options.WithOpenAIProvider("api-key"),
+    options.WithRedisBackend("localhost:6379", 0),
+)
+```
+
+## Performance Tips
+
+1. **Choose the right backend**: LRU for time-locality, LFU for frequency-based access
+2. **Batch operations**: Use `SetBatch`, `GetBatch` for multiple operations
+3. **Adjust similarity threshold**: Higher thresholds = fewer, more precise matches
+4. **Use context**: Enable request cancellation and timeouts
+
+## Error Handling
+
+The library returns descriptive errors for common issues:
+
+```go
+cache, err := semanticcache.New[string, string](
+    options.WithOpenAIProvider("invalid-key"),
+    options.WithLRUBackend(1000),
+)
+if err != nil {
+    // Handle configuration errors
+    log.Printf("Cache creation failed: %v", err)
+}
+
+match, err := cache.Lookup(ctx, "query", 0.8)
+if err != nil {
+    // Handle runtime errors (network, API limits, etc.)
+    log.Printf("Lookup failed: %v", err)
+}
+```
+
+## Examples
+
+Check out the `examples/` directory for complete examples:
+
+- Basic usage with OpenAI
+- Custom similarity functions
+- Redis backend setup
+- Batch operations
+- LLM response caching
+
+## Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 
-MIT License
-
----
-
-*Built with ❤️ for the Go community*
+MIT License - see [LICENSE](LICENSE) for details.

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"os"
 
-	openai "github.com/openai/openai-go"
-	"github.com/openai/openai-go/option"
+	openai "github.com/openai/openai-go/v2"
+	"github.com/openai/openai-go/v2/option"
 )
 
 const (
@@ -59,7 +59,7 @@ func NewOpenAIProvider(config OpenAIConfig) (*OpenAIProvider, error) {
 // EmbedText sends the embedding request to OpenAI.
 func (p *OpenAIProvider) EmbedText(text string) ([]float32, error) {
 	resp, err := p.client.Embeddings.New(context.Background(), openai.EmbeddingNewParams{
-		Model: p.model,
+		Model: openai.EmbeddingModel(p.model),
 		Input: openai.EmbeddingNewParamsInputUnion{
 			OfArrayOfStrings: []string{text},
 		},
