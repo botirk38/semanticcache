@@ -5,7 +5,7 @@ go 1.24.2
 require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/openai/openai-go/v2 v2.3.0
-	github.com/redis/go-redis/v9 v9.12.0
+	github.com/redis/go-redis/v9 v9.13.0
 )
 
 require (
