@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.24"
       - name: Cache Go modules
@@ -37,7 +37,7 @@ jobs:
     needs: build
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.24"
       - name: Check formatting
@@ -58,7 +58,7 @@ jobs:
     needs: [build, gofmt]
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.24"
       - name: Run golangci-lint
@@ -72,7 +72,7 @@ jobs:
     needs: [build, gofmt, golangci]
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.24"
       - name: Cache Go modules
@@ -93,7 +93,7 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.24"
       - name: Install gosec
