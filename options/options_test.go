@@ -115,7 +115,7 @@ func TestBackendOptions(t *testing.T) {
 		cfg := NewConfig[string, string]()
 		mockBackend := &mockBackend[string, string]{}
 
-		err := cfg.Apply(WithCustomBackend[string, string](mockBackend))
+		err := cfg.Apply(WithCustomBackend(mockBackend))
 		if err != nil {
 			t.Fatalf("Failed to set custom backend: %v", err)
 		}
@@ -252,4 +252,32 @@ func (m *mockBackend[K, V]) GetEmbedding(ctx context.Context, key K) ([]float32,
 
 func (m *mockBackend[K, V]) Close() error {
 	return nil
+}
+
+func (m *mockBackend[K, V]) SetAsync(ctx context.Context, key K, entry types.Entry[V]) <-chan error {
+	errCh := make(chan error, 1)
+	errCh <- nil
+	close(errCh)
+	return errCh
+}
+
+func (m *mockBackend[K, V]) GetAsync(ctx context.Context, key K) <-chan types.AsyncGetResult[V] {
+	resultCh := make(chan types.AsyncGetResult[V], 1)
+	resultCh <- types.AsyncGetResult[V]{Entry: types.Entry[V]{}, Found: false, Error: nil}
+	close(resultCh)
+	return resultCh
+}
+
+func (m *mockBackend[K, V]) DeleteAsync(ctx context.Context, key K) <-chan error {
+	errCh := make(chan error, 1)
+	errCh <- nil
+	close(errCh)
+	return errCh
+}
+
+func (m *mockBackend[K, V]) GetBatchAsync(ctx context.Context, keys []K) <-chan types.AsyncBatchResult[K, V] {
+	resultCh := make(chan types.AsyncBatchResult[K, V], 1)
+	resultCh <- types.AsyncBatchResult[K, V]{Entries: make(map[K]types.Entry[V]), Error: nil}
+	close(resultCh)
+	return resultCh
 }

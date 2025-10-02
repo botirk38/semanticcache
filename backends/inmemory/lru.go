@@ -132,3 +132,57 @@ func (b *LRUBackend[K, V]) GetEmbedding(ctx context.Context, key K) ([]float32, 
 func (b *LRUBackend[K, V]) Close() error {
 	return nil
 }
+
+// SetAsync stores an entry asynchronously
+func (b *LRUBackend[K, V]) SetAsync(ctx context.Context, key K, entry types.Entry[V]) <-chan error {
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(errCh)
+		errCh <- b.Set(ctx, key, entry)
+	}()
+	return errCh
+}
+
+// GetAsync retrieves an entry asynchronously
+func (b *LRUBackend[K, V]) GetAsync(ctx context.Context, key K) <-chan types.AsyncGetResult[V] {
+	resultCh := make(chan types.AsyncGetResult[V], 1)
+	go func() {
+		defer close(resultCh)
+		entry, found, err := b.Get(ctx, key)
+		resultCh <- types.AsyncGetResult[V]{
+			Entry: entry,
+			Found: found,
+			Error: err,
+		}
+	}()
+	return resultCh
+}
+
+// DeleteAsync removes an entry asynchronously
+func (b *LRUBackend[K, V]) DeleteAsync(ctx context.Context, key K) <-chan error {
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(errCh)
+		errCh <- b.Delete(ctx, key)
+	}()
+	return errCh
+}
+
+// GetBatchAsync retrieves multiple entries asynchronously
+func (b *LRUBackend[K, V]) GetBatchAsync(ctx context.Context, keys []K) <-chan types.AsyncBatchResult[K, V] {
+	resultCh := make(chan types.AsyncBatchResult[K, V], 1)
+	go func() {
+		defer close(resultCh)
+		entries := make(map[K]types.Entry[V])
+		for _, key := range keys {
+			if entry, found, err := b.Get(ctx, key); err == nil && found {
+				entries[key] = entry
+			}
+		}
+		resultCh <- types.AsyncBatchResult[K, V]{
+			Entries: entries,
+			Error:   nil,
+		}
+	}()
+	return resultCh
+}

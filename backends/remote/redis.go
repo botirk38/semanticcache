@@ -460,3 +460,103 @@ func (b *RedisBackend[K, V]) VectorSearch(ctx context.Context, queryEmbedding []
 func (b *RedisBackend[K, V]) Close() error {
 	return b.client.Close()
 }
+
+// SetAsync stores an entry asynchronously using Redis pipelining
+func (b *RedisBackend[K, V]) SetAsync(ctx context.Context, key K, entry types.Entry[V]) <-chan error {
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(errCh)
+		errCh <- b.Set(ctx, key, entry)
+	}()
+	return errCh
+}
+
+// GetAsync retrieves an entry asynchronously using Redis pipelining
+func (b *RedisBackend[K, V]) GetAsync(ctx context.Context, key K) <-chan types.AsyncGetResult[V] {
+	resultCh := make(chan types.AsyncGetResult[V], 1)
+	go func() {
+		defer close(resultCh)
+		entry, found, err := b.Get(ctx, key)
+		resultCh <- types.AsyncGetResult[V]{
+			Entry: entry,
+			Found: found,
+			Error: err,
+		}
+	}()
+	return resultCh
+}
+
+// DeleteAsync removes an entry asynchronously using Redis pipelining
+func (b *RedisBackend[K, V]) DeleteAsync(ctx context.Context, key K) <-chan error {
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(errCh)
+		errCh <- b.Delete(ctx, key)
+	}()
+	return errCh
+}
+
+// GetBatchAsync retrieves multiple entries asynchronously using Redis pipeline
+func (b *RedisBackend[K, V]) GetBatchAsync(ctx context.Context, keys []K) <-chan types.AsyncBatchResult[K, V] {
+	resultCh := make(chan types.AsyncBatchResult[K, V], 1)
+	go func() {
+		defer close(resultCh)
+
+		entries := make(map[K]types.Entry[V])
+		pipe := b.client.Pipeline()
+
+		// Build pipeline commands
+		cmds := make(map[K]*redis.JSONCmd)
+		for _, key := range keys {
+			redisKey := b.keyString(key)
+			cmds[key] = pipe.JSONGet(ctx, redisKey, "$")
+		}
+
+		// Execute pipeline
+		_, err := pipe.Exec(ctx)
+		if err != nil && err != redis.Nil {
+			resultCh <- types.AsyncBatchResult[K, V]{
+				Entries: nil,
+				Error:   fmt.Errorf("pipeline execution failed: %w", err),
+			}
+			return
+		}
+
+		// Process results
+		for key, cmd := range cmds {
+			result, err := cmd.Result()
+			if err == redis.Nil {
+				continue
+			}
+			if err != nil {
+				continue
+			}
+
+			var docs []redisDocument[V]
+			if err := json.Unmarshal([]byte(result), &docs); err != nil {
+				continue
+			}
+
+			if len(docs) == 0 {
+				continue
+			}
+
+			doc := docs[0]
+			embedding := make([]float32, len(doc.Embedding))
+			for i, f := range doc.Embedding {
+				embedding[i] = float32(f)
+			}
+
+			entries[key] = types.Entry[V]{
+				Embedding: embedding,
+				Value:     doc.Value,
+			}
+		}
+
+		resultCh <- types.AsyncBatchResult[K, V]{
+			Entries: entries,
+			Error:   nil,
+		}
+	}()
+	return resultCh
+}

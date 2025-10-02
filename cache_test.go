@@ -124,6 +124,57 @@ func (m *mockBackend[K, V]) Close() error {
 	return nil
 }
 
+// Async methods for mockBackend
+func (m *mockBackend[K, V]) SetAsync(ctx context.Context, key K, entry types.Entry[V]) <-chan error {
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(errCh)
+		errCh <- m.Set(ctx, key, entry)
+	}()
+	return errCh
+}
+
+func (m *mockBackend[K, V]) GetAsync(ctx context.Context, key K) <-chan types.AsyncGetResult[V] {
+	resultCh := make(chan types.AsyncGetResult[V], 1)
+	go func() {
+		defer close(resultCh)
+		entry, found, err := m.Get(ctx, key)
+		resultCh <- types.AsyncGetResult[V]{
+			Entry: entry,
+			Found: found,
+			Error: err,
+		}
+	}()
+	return resultCh
+}
+
+func (m *mockBackend[K, V]) DeleteAsync(ctx context.Context, key K) <-chan error {
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(errCh)
+		errCh <- m.Delete(ctx, key)
+	}()
+	return errCh
+}
+
+func (m *mockBackend[K, V]) GetBatchAsync(ctx context.Context, keys []K) <-chan types.AsyncBatchResult[K, V] {
+	resultCh := make(chan types.AsyncBatchResult[K, V], 1)
+	go func() {
+		defer close(resultCh)
+		entries := make(map[K]types.Entry[V])
+		for _, key := range keys {
+			if entry, found, err := m.Get(ctx, key); err == nil && found {
+				entries[key] = entry
+			}
+		}
+		resultCh <- types.AsyncBatchResult[K, V]{
+			Entries: entries,
+			Error:   nil,
+		}
+	}()
+	return resultCh
+}
+
 type testError struct {
 	msg string
 }

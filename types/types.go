@@ -40,6 +40,32 @@ type CacheBackend[K comparable, V any] interface {
 
 	// Close closes the backend and releases resources
 	Close() error
+
+	// Async operations
+	// SetAsync stores a value asynchronously
+	SetAsync(ctx context.Context, key K, entry Entry[V]) <-chan error
+
+	// GetAsync retrieves an entry asynchronously
+	GetAsync(ctx context.Context, key K) <-chan AsyncGetResult[V]
+
+	// DeleteAsync removes an entry asynchronously
+	DeleteAsync(ctx context.Context, key K) <-chan error
+
+	// GetBatchAsync retrieves multiple entries asynchronously
+	GetBatchAsync(ctx context.Context, keys []K) <-chan AsyncBatchResult[K, V]
+}
+
+// AsyncGetResult holds the result of an async Get operation at the backend level.
+type AsyncGetResult[V any] struct {
+	Entry Entry[V]
+	Found bool
+	Error error
+}
+
+// AsyncBatchResult holds the result of an async batch operation.
+type AsyncBatchResult[K comparable, V any] struct {
+	Entries map[K]Entry[V]
+	Error   error
 }
 
 // BackendConfig provides configuration options for backends

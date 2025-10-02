@@ -231,3 +231,217 @@ func (sc *SemanticCache[K, V]) Close() error {
 	sc.provider.Close()
 	return nil
 }
+
+// SetAsync stores or updates the entry asynchronously using backend async capabilities.
+// Returns a channel that will receive an error or nil when complete.
+func (sc *SemanticCache[K, V]) SetAsync(ctx context.Context, key K, inputText string, value V) <-chan error {
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(errCh)
+		if key == *new(K) {
+			errCh <- errors.New("key cannot be zero value")
+			return
+		}
+		embedding, err := sc.provider.EmbedText(inputText)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		entry := types.Entry[V]{Embedding: embedding, Value: value}
+
+		// Use backend's async method
+		backendErrCh := sc.backend.SetAsync(ctx, key, entry)
+		errCh <- <-backendErrCh
+	}()
+	return errCh
+}
+
+// GetResult holds the result of an async Get operation.
+type GetResult[V any] struct {
+	Value V
+	Found bool
+	Error error
+}
+
+// GetAsync retrieves the value asynchronously using backend async capabilities.
+// Returns a channel that will receive the result when complete.
+func (sc *SemanticCache[K, V]) GetAsync(ctx context.Context, key K) <-chan GetResult[V] {
+	resultCh := make(chan GetResult[V], 1)
+	go func() {
+		defer close(resultCh)
+
+		// Use backend's async method
+		backendResultCh := sc.backend.GetAsync(ctx, key)
+		backendResult := <-backendResultCh
+
+		if backendResult.Error != nil {
+			resultCh <- GetResult[V]{Error: backendResult.Error}
+			return
+		}
+
+		resultCh <- GetResult[V]{
+			Value: backendResult.Entry.Value,
+			Found: backendResult.Found,
+			Error: nil,
+		}
+	}()
+	return resultCh
+}
+
+// DeleteAsync removes the entry asynchronously using backend async capabilities.
+// Returns a channel that will receive an error or nil when complete.
+func (sc *SemanticCache[K, V]) DeleteAsync(ctx context.Context, key K) <-chan error {
+	return sc.backend.DeleteAsync(ctx, key)
+}
+
+// LookupResult holds the result of an async Lookup operation.
+type LookupResult[V any] struct {
+	Match *Match[V]
+	Error error
+}
+
+// LookupAsync performs semantic lookup asynchronously.
+// Returns a channel that will receive the result when complete.
+func (sc *SemanticCache[K, V]) LookupAsync(ctx context.Context, inputText string, threshold float32) <-chan LookupResult[V] {
+	resultCh := make(chan LookupResult[V], 1)
+	go func() {
+		defer close(resultCh)
+		match, err := sc.Lookup(ctx, inputText, threshold)
+		resultCh <- LookupResult[V]{Match: match, Error: err}
+	}()
+	return resultCh
+}
+
+// TopMatchesResult holds the result of an async TopMatches operation.
+type TopMatchesResult[V any] struct {
+	Matches []Match[V]
+	Error   error
+}
+
+// TopMatchesAsync returns top matches asynchronously.
+// Returns a channel that will receive the result when complete.
+func (sc *SemanticCache[K, V]) TopMatchesAsync(ctx context.Context, inputText string, n int) <-chan TopMatchesResult[V] {
+	resultCh := make(chan TopMatchesResult[V], 1)
+	go func() {
+		defer close(resultCh)
+		matches, err := sc.TopMatches(ctx, inputText, n)
+		resultCh <- TopMatchesResult[V]{Matches: matches, Error: err}
+	}()
+	return resultCh
+}
+
+// SetBatchAsync stores multiple entries asynchronously.
+// Returns a channel that will receive an error or nil when complete.
+func (sc *SemanticCache[K, V]) SetBatchAsync(ctx context.Context, items []BatchItem[K, V]) <-chan error {
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(errCh)
+		if len(items) == 0 {
+			errCh <- nil
+			return
+		}
+
+		for _, item := range items {
+			if item.Key == *new(K) {
+				errCh <- errors.New("key cannot be zero value")
+				return
+			}
+		}
+
+		// Process all items and use backend async for each
+		type setResult struct {
+			err error
+		}
+		resultCh := make(chan setResult, len(items))
+
+		for _, item := range items {
+			go func(it BatchItem[K, V]) {
+				embedding, err := sc.provider.EmbedText(it.InputText)
+				if err != nil {
+					resultCh <- setResult{err: err}
+					return
+				}
+				entry := types.Entry[V]{Embedding: embedding, Value: it.Value}
+				backendErrCh := sc.backend.SetAsync(ctx, it.Key, entry)
+				resultCh <- setResult{err: <-backendErrCh}
+			}(item)
+		}
+
+		// Wait for all to complete
+		for range items {
+			result := <-resultCh
+			if result.err != nil {
+				errCh <- result.err
+				return
+			}
+		}
+		errCh <- nil
+	}()
+	return errCh
+}
+
+// GetBatchResult holds the result of an async GetBatch operation.
+type GetBatchResult[K comparable, V any] struct {
+	Values map[K]V
+	Error  error
+}
+
+// GetBatchAsync retrieves multiple values asynchronously using backend async capabilities.
+// Returns a channel that will receive the result when complete.
+func (sc *SemanticCache[K, V]) GetBatchAsync(ctx context.Context, keys []K) <-chan GetBatchResult[K, V] {
+	resultCh := make(chan GetBatchResult[K, V], 1)
+	go func() {
+		defer close(resultCh)
+
+		// Use backend's async batch method
+		backendResultCh := sc.backend.GetBatchAsync(ctx, keys)
+		backendResult := <-backendResultCh
+
+		if backendResult.Error != nil {
+			resultCh <- GetBatchResult[K, V]{Error: backendResult.Error}
+			return
+		}
+
+		// Extract values from entries
+		values := make(map[K]V)
+		for key, entry := range backendResult.Entries {
+			values[key] = entry.Value
+		}
+
+		resultCh <- GetBatchResult[K, V]{Values: values, Error: nil}
+	}()
+	return resultCh
+}
+
+// DeleteBatchAsync removes multiple entries asynchronously using backend async capabilities.
+// Returns a channel that will receive an error or nil when complete.
+func (sc *SemanticCache[K, V]) DeleteBatchAsync(ctx context.Context, keys []K) <-chan error {
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(errCh)
+
+		// Use goroutines to delete keys concurrently
+		type delResult struct {
+			err error
+		}
+		resultCh := make(chan delResult, len(keys))
+
+		for _, key := range keys {
+			go func(k K) {
+				backendErrCh := sc.backend.DeleteAsync(ctx, k)
+				resultCh <- delResult{err: <-backendErrCh}
+			}(key)
+		}
+
+		// Wait for all to complete
+		for range keys {
+			result := <-resultCh
+			if result.err != nil {
+				errCh <- result.err
+				return
+			}
+		}
+		errCh <- nil
+	}()
+	return errCh
+}
