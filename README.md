@@ -7,11 +7,12 @@ A high-performance semantic caching library for Go that uses vector embeddings t
 - 🚀 **Multiple Backend Support**: In-memory (LRU, LFU, FIFO) and Redis
 - 🤖 **OpenAI Integration**: Built-in support for OpenAI's embedding models
 - 🎯 **Semantic Search**: Find similar content using vector similarity
-- ⚡ **High Performance**: Optimized similarity algorithms
+- ⚡ **High Performance**: Optimized similarity algorithms with async support
 - 🛠️ **Extensible**: Pluggable backends and embedding providers
 - 📦 **Type Safe**: Full generic support for any key/value types
 - 🔄 **Context Aware**: Built-in context support for all operations
-- 📊 **Batch Operations**: Efficient bulk operations
+- 📊 **Batch Operations**: Efficient bulk operations (sync & async)
+- ⚙️ **Async API**: Non-blocking operations with channel-based results
 
 ## Quick Start
 
@@ -164,6 +165,61 @@ values, err := cache.GetBatch(ctx, []string{"key1", "key2"})
 
 // Batch delete
 err := cache.DeleteBatch(ctx, []string{"key1", "key2"})
+```
+
+### Async Operations
+
+All cache operations have async variants that return channels for non-blocking execution:
+
+```go
+// Async set - returns immediately
+errCh := cache.SetAsync(ctx, "key", "input text", "value")
+// Do other work...
+if err := <-errCh; err != nil {
+    log.Printf("Set failed: %v", err)
+}
+
+// Async get
+resultCh := cache.GetAsync(ctx, "key")
+result := <-resultCh
+if result.Error != nil {
+    log.Printf("Get failed: %v", result.Error)
+}
+if result.Found {
+    fmt.Printf("Value: %v\n", result.Value)
+}
+
+// Async semantic search
+lookupCh := cache.LookupAsync(ctx, "search query", 0.8)
+lookupResult := <-lookupCh
+if lookupResult.Match != nil {
+    fmt.Printf("Found: %v (score: %.2f)\n",
+        lookupResult.Match.Value, lookupResult.Match.Score)
+}
+
+// Async batch operations for concurrent processing
+errCh = cache.SetBatchAsync(ctx, items)
+err = <-errCh
+
+valuesCh := cache.GetBatchAsync(ctx, []string{"key1", "key2", "key3"})
+batchResult := <-valuesCh
+if batchResult.Error == nil {
+    for key, value := range batchResult.Values {
+        fmt.Printf("%s: %v\n", key, value)
+    }
+}
+
+// Concurrent async operations
+errCh1 := cache.SetAsync(ctx, "key1", "text1", "value1")
+errCh2 := cache.SetAsync(ctx, "key2", "text2", "value2")
+errCh3 := cache.SetAsync(ctx, "key3", "text3", "value3")
+
+// Wait for all to complete
+for _, ch := range []<-chan error{errCh1, errCh2, errCh3} {
+    if err := <-ch; err != nil {
+        log.Printf("Operation failed: %v", err)
+    }
+}
 ```
 
 ## Advanced Usage
