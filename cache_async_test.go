@@ -11,7 +11,7 @@ func TestAsyncOperations(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("SetAsync", func(t *testing.T) {
-		cache, err := New[string, string](
+		cache, err := New(
 			options.WithLRUBackend[string, string](10),
 			options.WithCustomProvider[string, string](newMockProvider()),
 		)
@@ -39,7 +39,7 @@ func TestAsyncOperations(t *testing.T) {
 	})
 
 	t.Run("GetAsync", func(t *testing.T) {
-		cache, err := New[string, string](
+		cache, err := New(
 			options.WithLRUBackend[string, string](10),
 			options.WithCustomProvider[string, string](newMockProvider()),
 		)
@@ -69,7 +69,7 @@ func TestAsyncOperations(t *testing.T) {
 	})
 
 	t.Run("GetAsync_NotFound", func(t *testing.T) {
-		cache, err := New[string, string](
+		cache, err := New(
 			options.WithLRUBackend[string, string](10),
 			options.WithCustomProvider[string, string](newMockProvider()),
 		)
@@ -89,7 +89,7 @@ func TestAsyncOperations(t *testing.T) {
 	})
 
 	t.Run("DeleteAsync", func(t *testing.T) {
-		cache, err := New[string, string](
+		cache, err := New(
 			options.WithLRUBackend[string, string](10),
 			options.WithCustomProvider[string, string](newMockProvider()),
 		)
@@ -121,7 +121,7 @@ func TestAsyncOperations(t *testing.T) {
 	})
 
 	t.Run("LookupAsync", func(t *testing.T) {
-		cache, err := New[string, string](
+		cache, err := New(
 			options.WithLRUBackend[string, string](10),
 			options.WithCustomProvider[string, string](newMockProvider()),
 		)
@@ -148,7 +148,7 @@ func TestAsyncOperations(t *testing.T) {
 	})
 
 	t.Run("TopMatchesAsync", func(t *testing.T) {
-		cache, err := New[string, string](
+		cache, err := New(
 			options.WithLRUBackend[string, string](10),
 			options.WithCustomProvider[string, string](newMockProvider()),
 		)
@@ -179,7 +179,7 @@ func TestAsyncOperations(t *testing.T) {
 	})
 
 	t.Run("SetBatchAsync", func(t *testing.T) {
-		cache, err := New[string, string](
+		cache, err := New(
 			options.WithLRUBackend[string, string](10),
 			options.WithCustomProvider[string, string](newMockProvider()),
 		)
@@ -214,7 +214,7 @@ func TestAsyncOperations(t *testing.T) {
 	})
 
 	t.Run("GetBatchAsync", func(t *testing.T) {
-		cache, err := New[string, string](
+		cache, err := New(
 			options.WithLRUBackend[string, string](10),
 			options.WithCustomProvider[string, string](newMockProvider()),
 		)
@@ -251,7 +251,7 @@ func TestAsyncOperations(t *testing.T) {
 	})
 
 	t.Run("DeleteBatchAsync", func(t *testing.T) {
-		cache, err := New[string, string](
+		cache, err := New(
 			options.WithLRUBackend[string, string](10),
 			options.WithCustomProvider[string, string](newMockProvider()),
 		)
@@ -295,7 +295,7 @@ func TestAsyncOperations(t *testing.T) {
 	})
 
 	t.Run("ConcurrentAsyncOperations", func(t *testing.T) {
-		cache, err := New[string, string](
+		cache, err := New(
 			options.WithLRUBackend[string, string](100),
 			options.WithCustomProvider[string, string](newMockProvider()),
 		)

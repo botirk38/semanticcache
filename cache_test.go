@@ -185,7 +185,7 @@ func (e *testError) Error() string {
 
 func TestSemanticCacheCreation(t *testing.T) {
 	t.Run("NewWithOptions", func(t *testing.T) {
-		cache, err := New[string, string](
+		cache, err := New(
 			options.WithLRUBackend[string, string](10),
 			options.WithCustomProvider[string, string](newMockProvider()),
 		)
@@ -212,7 +212,7 @@ func TestSemanticCacheCreation(t *testing.T) {
 	})
 
 	t.Run("MissingBackend", func(t *testing.T) {
-		_, err := New[string, string](
+		_, err := New(
 			options.WithCustomProvider[string, string](newMockProvider()),
 		)
 		if err == nil {
@@ -221,7 +221,7 @@ func TestSemanticCacheCreation(t *testing.T) {
 	})
 
 	t.Run("MissingProvider", func(t *testing.T) {
-		_, err := New[string, string](
+		_, err := New(
 			options.WithLRUBackend[string, string](10),
 		)
 		if err == nil {
@@ -252,8 +252,8 @@ func TestSemanticCacheCreation(t *testing.T) {
 }
 
 func TestSemanticCacheOperations(t *testing.T) {
-	cache, err := New[string, string](
-		options.WithCustomBackend[string, string](newMockBackend[string, string]()),
+	cache, err := New(
+		options.WithCustomBackend(newMockBackend[string, string]()),
 		options.WithCustomProvider[string, string](newMockProvider()),
 		options.WithSimilarityComparator[string, string](similarity.CosineSimilarity),
 	)
@@ -394,8 +394,8 @@ func TestSemanticCacheOperations(t *testing.T) {
 }
 
 func TestSemanticSearch(t *testing.T) {
-	cache, err := New[string, string](
-		options.WithCustomBackend[string, string](newMockBackend[string, string]()),
+	cache, err := New(
+		options.WithCustomBackend(newMockBackend[string, string]()),
 		options.WithCustomProvider[string, string](newMockProvider()),
 		options.WithSimilarityComparator[string, string](similarity.CosineSimilarity),
 	)
@@ -482,8 +482,8 @@ func TestSemanticSearch(t *testing.T) {
 }
 
 func TestBatchOperations(t *testing.T) {
-	cache, err := New[string, string](
-		options.WithCustomBackend[string, string](newMockBackend[string, string]()),
+	cache, err := New(
+		options.WithCustomBackend(newMockBackend[string, string]()),
 		options.WithCustomProvider[string, string](newMockProvider()),
 		options.WithSimilarityComparator[string, string](similarity.CosineSimilarity),
 	)
@@ -585,8 +585,8 @@ func TestBatchOperations(t *testing.T) {
 func TestErrorHandling(t *testing.T) {
 	t.Run("ProviderError", func(t *testing.T) {
 		provider := &mockProvider{shouldErr: true}
-		cache, err := New[string, string](
-			options.WithCustomBackend[string, string](newMockBackend[string, string]()),
+		cache, err := New(
+			options.WithCustomBackend(newMockBackend[string, string]()),
 			options.WithCustomProvider[string, string](provider),
 		)
 		if err != nil {
@@ -652,8 +652,8 @@ func TestErrorHandling(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
-	cache, err := New[string, string](
-		options.WithCustomBackend[string, string](newMockBackend[string, string]()),
+	cache, err := New(
+		options.WithCustomBackend(newMockBackend[string, string]()),
 		options.WithCustomProvider[string, string](newMockProvider()),
 	)
 	if err != nil {
@@ -668,8 +668,8 @@ func TestClose(t *testing.T) {
 
 func TestWithDifferentTypes(t *testing.T) {
 	t.Run("IntKey", func(t *testing.T) {
-		cache, err := New[int, string](
-			options.WithCustomBackend[int, string](newMockBackend[int, string]()),
+		cache, err := New(
+			options.WithCustomBackend(newMockBackend[int, string]()),
 			options.WithCustomProvider[int, string](newMockProvider()),
 		)
 		if err != nil {
@@ -700,8 +700,8 @@ func TestWithDifferentTypes(t *testing.T) {
 			Age  int
 		}
 
-		cache, err := New[string, TestStruct](
-			options.WithCustomBackend[string, TestStruct](newMockBackend[string, TestStruct]()),
+		cache, err := New(
+			options.WithCustomBackend(newMockBackend[string, TestStruct]()),
 			options.WithCustomProvider[string, TestStruct](newMockProvider()),
 		)
 		if err != nil {
