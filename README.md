@@ -301,15 +301,30 @@ if err != nil {
 }
 ```
 
-## Examples
+## Documentation
 
-Check out the `examples/` directory for complete examples:
+📚 **[Complete Documentation](docs/README.md)**
 
-- Basic usage with OpenAI
-- Custom similarity functions
-- Redis backend setup
-- Batch operations
-- LLM response caching
+### Quick Links
+
+- **[API Reference](docs/api-reference.md)** - Complete API documentation
+- **[Architecture Guide](docs/architecture.md)** - Design patterns and internals
+- **[Performance Guide](docs/performance.md)** - Optimization and best practices
+- **[Examples & Tutorials](docs/examples.md)** - Practical code examples
+- **[Redis Setup](docs/redis-setup.md)** - Redis backend configuration
+
+### Examples
+
+The [examples documentation](docs/examples.md) includes:
+
+- ✅ FAQ System with semantic search
+- ✅ LLM Response caching
+- ✅ Product search
+- ✅ Async batch processing
+- ✅ HTTP API server integration
+- ✅ Custom backends (SQLite, etc.)
+- ✅ Custom providers (Ollama, etc.)
+- ✅ Monitoring and observability
 
 ## Contributing
 
