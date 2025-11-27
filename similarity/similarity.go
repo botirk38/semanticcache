@@ -2,5 +2,5 @@
 package similarity
 
 // SimilarityFunc represents a function that computes similarity between two embedding vectors.
-// It should return a float32 where higher values indicate greater similarity.
-type SimilarityFunc func(a, b []float32) float32
+// It should return a float64 where higher values indicate greater similarity.
+type SimilarityFunc func(a, b []float64) float64

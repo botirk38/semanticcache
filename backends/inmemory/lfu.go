@@ -17,7 +17,7 @@ type LFUEntry[V any] struct {
 type LFUBackend[K comparable, V any] struct {
 	mu       *sync.RWMutex
 	entries  map[K]*LFUEntry[V]
-	index    map[K][]float32
+	index    map[K][]float64
 	capacity int
 }
 
@@ -26,7 +26,7 @@ func NewLFUBackend[K comparable, V any](config types.BackendConfig) (*LFUBackend
 	return &LFUBackend[K, V]{
 		mu:       &sync.RWMutex{},
 		entries:  make(map[K]*LFUEntry[V]),
-		index:    make(map[K][]float32),
+		index:    make(map[K][]float64),
 		capacity: config.Capacity,
 	}, nil
 }
@@ -111,7 +111,7 @@ func (b *LFUBackend[K, V]) Flush(ctx context.Context) error {
 	defer b.mu.Unlock()
 
 	b.entries = make(map[K]*LFUEntry[V])
-	b.index = make(map[K][]float32)
+	b.index = make(map[K][]float64)
 	return nil
 }
 
@@ -136,7 +136,7 @@ func (b *LFUBackend[K, V]) Keys(ctx context.Context) ([]K, error) {
 }
 
 // GetEmbedding retrieves just the embedding for a key (without incrementing frequency)
-func (b *LFUBackend[K, V]) GetEmbedding(ctx context.Context, key K) ([]float32, bool, error) {
+func (b *LFUBackend[K, V]) GetEmbedding(ctx context.Context, key K) ([]float64, bool, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 

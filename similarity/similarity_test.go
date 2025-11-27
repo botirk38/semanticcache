@@ -8,9 +8,9 @@ import (
 // Test similarity functions with known vectors
 func TestSimilarityFunctions(t *testing.T) {
 	// Test vectors
-	vec1 := []float32{1, 0, 0}
-	vec2 := []float32{0, 1, 0}
-	vec3 := []float32{1, 0, 0} // Same as vec1
+	vec1 := []float64{1, 0, 0}
+	vec2 := []float64{0, 1, 0}
+	vec3 := []float64{1, 0, 0} // Same as vec1
 
 	t.Run("CosineSimilarity", func(t *testing.T) {
 		// Test orthogonal vectors (should be 0)
@@ -26,13 +26,13 @@ func TestSimilarityFunctions(t *testing.T) {
 		}
 
 		// Test empty vectors
-		sim = CosineSimilarity([]float32{}, []float32{})
+		sim = CosineSimilarity([]float64{}, []float64{})
 		if sim != 0 {
 			t.Errorf("Expected 0 for empty vectors, got %f", sim)
 		}
 
 		// Test different length vectors
-		sim = CosineSimilarity(vec1, []float32{1, 0})
+		sim = CosineSimilarity(vec1, []float64{1, 0})
 		if sim != 0 {
 			t.Errorf("Expected 0 for different length vectors, got %f", sim)
 		}
@@ -52,7 +52,7 @@ func TestSimilarityFunctions(t *testing.T) {
 		}
 
 		// Test empty vectors
-		sim = EuclideanSimilarity([]float32{}, []float32{})
+		sim = EuclideanSimilarity([]float64{}, []float64{})
 		if sim != 0 {
 			t.Errorf("Expected 0 for empty vectors, got %f", sim)
 		}
@@ -88,8 +88,8 @@ func TestSimilarityFunctions(t *testing.T) {
 
 	t.Run("PearsonCorrelationSimilarity", func(t *testing.T) {
 		// Test with longer vectors for meaningful correlation
-		a := []float32{1, 2, 3, 4, 5}
-		b := []float32{2, 4, 6, 8, 10} // Perfect positive correlation
+		a := []float64{1, 2, 3, 4, 5}
+		b := []float64{2, 4, 6, 8, 10} // Perfect positive correlation
 
 		sim := PearsonCorrelationSimilarity(a, b)
 		if math.Abs(float64(sim-1)) > 0.001 {
@@ -97,7 +97,7 @@ func TestSimilarityFunctions(t *testing.T) {
 		}
 
 		// Test negative correlation
-		c := []float32{5, 4, 3, 2, 1}
+		c := []float64{5, 4, 3, 2, 1}
 		sim = PearsonCorrelationSimilarity(a, c)
 		if math.Abs(float64(sim+1)) > 0.001 {
 			t.Errorf("Expected ~-1 for negative correlation, got %f", sim)

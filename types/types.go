@@ -7,7 +7,7 @@ import (
 
 // Entry holds an embedding and its associated value.
 type Entry[V any] struct {
-	Embedding []float32
+	Embedding []float64
 	Value     V
 }
 
@@ -36,7 +36,7 @@ type CacheBackend[K comparable, V any] interface {
 	Keys(ctx context.Context) ([]K, error)
 
 	// GetEmbedding retrieves just the embedding for a key
-	GetEmbedding(ctx context.Context, key K) ([]float32, bool, error)
+	GetEmbedding(ctx context.Context, key K) ([]float64, bool, error)
 
 	// Close closes the backend and releases resources
 	Close() error
@@ -97,9 +97,19 @@ const (
 // EmbeddingProvider defines the interface all embedding providers must satisfy.
 type EmbeddingProvider interface {
 	// EmbedText turns a piece of text into its embedding vector.
-	EmbedText(text string) ([]float32, error)
+	EmbedText(text string) ([]float64, error)
 	// Close frees any resources held by the provider.
 	Close()
+}
+
+// BatchEmbeddingProvider is an optional interface that providers can implement
+// to support efficient batch embedding operations. If a provider implements this,
+// the cache will use it for better performance when embedding multiple chunks.
+type BatchEmbeddingProvider interface {
+	EmbeddingProvider
+	// EmbedBatch embeds multiple texts in a single operation.
+	// This is more efficient than calling EmbedText multiple times.
+	EmbedBatch(texts []string) ([][]float64, error)
 }
 
 // ProviderType represents the type of embedding provider

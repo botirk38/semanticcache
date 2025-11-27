@@ -4,15 +4,15 @@ import "math"
 
 // PearsonCorrelationSimilarity computes the Pearson correlation coefficient.
 // Returns a value between -1 and 1, where 1 means perfect positive correlation.
-func PearsonCorrelationSimilarity(a, b []float32) float32 {
+func PearsonCorrelationSimilarity(a, b []float64) float64 {
 	if len(a) != len(b) || len(a) == 0 {
 		return 0
 	}
 
-	n := float32(len(a))
+	n := float64(len(a))
 
 	// Calculate means
-	var meanA, meanB float32
+	var meanA, meanB float64
 	for i := range a {
 		meanA += a[i]
 		meanB += b[i]
@@ -21,7 +21,7 @@ func PearsonCorrelationSimilarity(a, b []float32) float32 {
 	meanB /= n
 
 	// Calculate correlation components
-	var numerator, sumSqA, sumSqB float32
+	var numerator, sumSqA, sumSqB float64
 	for i := range a {
 		diffA := a[i] - meanA
 		diffB := b[i] - meanB
@@ -30,7 +30,7 @@ func PearsonCorrelationSimilarity(a, b []float32) float32 {
 		sumSqB += diffB * diffB
 	}
 
-	denominator := float32(math.Sqrt(float64(sumSqA * sumSqB)))
+	denominator := math.Sqrt(sumSqA * sumSqB)
 	if denominator == 0 {
 		return 0
 	}

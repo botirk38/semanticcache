@@ -13,11 +13,11 @@ type mockProvider struct {
 	shouldErr bool
 }
 
-func (m *mockProvider) EmbedText(text string) ([]float32, error) {
+func (m *mockProvider) EmbedText(text string) ([]float64, error) {
 	if m.shouldErr {
 		return nil, &testError{"mock error"}
 	}
-	return []float32{0.1, 0.2, 0.3}, nil
+	return []float64{0.1, 0.2, 0.3}, nil
 }
 
 func (m *mockProvider) Close() {}
@@ -169,7 +169,7 @@ func TestProviderOptions(t *testing.T) {
 func TestSimilarityOptions(t *testing.T) {
 	t.Run("CustomSimilarity", func(t *testing.T) {
 		cfg := NewConfig[string, string]()
-		customSim := func(a, b []float32) float32 { return 0.5 }
+		customSim := func(a, b []float64) float64 { return 0.5 }
 
 		err := cfg.Apply(WithSimilarityComparator[string, string](customSim))
 		if err != nil {
@@ -177,7 +177,7 @@ func TestSimilarityOptions(t *testing.T) {
 		}
 
 		// Test that the custom function works
-		result := cfg.Comparator([]float32{1, 0}, []float32{0, 1})
+		result := cfg.Comparator([]float64{1, 0}, []float64{0, 1})
 		if result != 0.5 {
 			t.Errorf("Expected 0.5, got %f", result)
 		}
@@ -246,7 +246,7 @@ func (m *mockBackend[K, V]) Flush(ctx context.Context) error {
 	return nil
 }
 
-func (m *mockBackend[K, V]) GetEmbedding(ctx context.Context, key K) ([]float32, bool, error) {
+func (m *mockBackend[K, V]) GetEmbedding(ctx context.Context, key K) ([]float64, bool, error) {
 	return nil, false, nil
 }
 

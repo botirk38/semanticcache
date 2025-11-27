@@ -57,7 +57,7 @@ func NewOpenAIProvider(config OpenAIConfig) (*OpenAIProvider, error) {
 }
 
 // EmbedText sends the embedding request to OpenAI.
-func (p *OpenAIProvider) EmbedText(text string) ([]float32, error) {
+func (p *OpenAIProvider) EmbedText(text string) ([]float64, error) {
 	resp, err := p.client.Embeddings.New(context.Background(), openai.EmbeddingNewParams{
 		Model: openai.EmbeddingModel(p.model),
 		Input: openai.EmbeddingNewParamsInputUnion{
@@ -70,13 +70,44 @@ func (p *OpenAIProvider) EmbedText(text string) ([]float32, error) {
 	if len(resp.Data) == 0 {
 		return nil, errors.New("no embedding returned by OpenAI")
 	}
-	// OpenAI returns []float64; convert to []float32
-	embeddingF64 := resp.Data[0].Embedding
-	embeddingF32 := make([]float32, len(embeddingF64))
-	for i, v := range embeddingF64 {
-		embeddingF32[i] = float32(v)
+	// Return native float64 from OpenAI
+	return resp.Data[0].Embedding, nil
+}
+
+// EmbedBatch sends a batch embedding request to OpenAI.
+// This is more efficient than calling EmbedText multiple times as it
+// makes a single API call for all texts. OpenAI supports up to 2048 texts per request.
+func (p *OpenAIProvider) EmbedBatch(texts []string) ([][]float64, error) {
+	if len(texts) == 0 {
+		return nil, errors.New("no texts provided for batch embedding")
 	}
-	return embeddingF32, nil
+
+	// OpenAI supports up to 2048 texts per request
+	if len(texts) > 2048 {
+		return nil, errors.New("batch size exceeds OpenAI limit of 2048 texts")
+	}
+
+	resp, err := p.client.Embeddings.New(context.Background(), openai.EmbeddingNewParams{
+		Model: openai.EmbeddingModel(p.model),
+		Input: openai.EmbeddingNewParamsInputUnion{
+			OfArrayOfStrings: texts,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if len(resp.Data) != len(texts) {
+		return nil, errors.New("number of embeddings returned does not match number of texts")
+	}
+
+	// Return native float64 embeddings from OpenAI
+	embeddings := make([][]float64, len(resp.Data))
+	for i, data := range resp.Data {
+		embeddings[i] = data.Embedding
+	}
+
+	return embeddings, nil
 }
 
 func (p *OpenAIProvider) Close() {}

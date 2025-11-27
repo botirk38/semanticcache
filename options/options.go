@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/botirk38/semanticcache/backends"
+	"github.com/botirk38/semanticcache/chunker"
 	"github.com/botirk38/semanticcache/providers/openai"
 	"github.com/botirk38/semanticcache/similarity"
 	"github.com/botirk38/semanticcache/types"
@@ -15,15 +16,19 @@ type Option[K comparable, V any] func(*Config[K, V]) error
 
 // Config holds the configuration for building a SemanticCache
 type Config[K comparable, V any] struct {
-	Backend    types.CacheBackend[K, V]
-	Provider   types.EmbeddingProvider
-	Comparator similarity.SimilarityFunc
+	Backend        types.CacheBackend[K, V]
+	Provider       types.EmbeddingProvider
+	Comparator     similarity.SimilarityFunc
+	ChunkConfig    chunker.ChunkConfig
+	EnableChunking bool
 }
 
 // NewConfig creates a new configuration with default values
 func NewConfig[K comparable, V any]() *Config[K, V] {
 	return &Config[K, V]{
-		Comparator: similarity.CosineSimilarity,
+		Comparator:     similarity.CosineSimilarity,
+		ChunkConfig:    chunker.DefaultChunkConfig(),
+		EnableChunking: true, // Enabled by default with sensible defaults
 	}
 }
 
@@ -153,6 +158,26 @@ func WithSimilarityComparator[K comparable, V any](comparator similarity.Similar
 			return errors.New("comparator cannot be nil")
 		}
 		cfg.Comparator = comparator
+		return nil
+	}
+}
+
+// WithChunking enables automatic text chunking with custom configuration
+func WithChunking[K comparable, V any](config chunker.ChunkConfig) Option[K, V] {
+	return func(cfg *Config[K, V]) error {
+		if err := config.Validate(); err != nil {
+			return err
+		}
+		cfg.ChunkConfig = config
+		cfg.EnableChunking = true
+		return nil
+	}
+}
+
+// WithoutChunking disables automatic text chunking
+func WithoutChunking[K comparable, V any]() Option[K, V] {
+	return func(cfg *Config[K, V]) error {
+		cfg.EnableChunking = false
 		return nil
 	}
 }

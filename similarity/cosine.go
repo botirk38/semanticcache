@@ -4,12 +4,12 @@ import "math"
 
 // CosineSimilarity computes the cosine similarity between two vectors.
 // Returns a value between -1 and 1, where 1 means identical direction.
-func CosineSimilarity(a, b []float32) float32 {
+func CosineSimilarity(a, b []float64) float64 {
 	if len(a) != len(b) || len(a) == 0 {
 		return 0
 	}
 
-	var dot, normA, normB float32
+	var dot, normA, normB float64
 	for i := range a {
 		dot += a[i] * b[i]
 		normA += a[i] * a[i]
@@ -20,5 +20,5 @@ func CosineSimilarity(a, b []float32) float32 {
 		return 0
 	}
 
-	return dot / (float32(math.Sqrt(float64(normA))) * float32(math.Sqrt(float64(normB))))
+	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
 }

@@ -3,8 +3,10 @@ package semanticcache
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 
+	"github.com/botirk38/semanticcache/chunker"
 	"github.com/botirk38/semanticcache/options"
 	"github.com/botirk38/semanticcache/similarity"
 	"github.com/botirk38/semanticcache/types"
@@ -12,15 +14,17 @@ import (
 
 // SemanticCache represents the semantic cache with configurable backend and embedding provider.
 type SemanticCache[K comparable, V any] struct {
-	backend    types.CacheBackend[K, V]
-	provider   types.EmbeddingProvider
-	comparator similarity.SimilarityFunc
+	backend        types.CacheBackend[K, V]
+	provider       types.EmbeddingProvider
+	comparator     similarity.SimilarityFunc
+	chunker        chunker.Chunker
+	enableChunking bool
 }
 
 // Match represents a semantic search result with its similarity score.
 type Match[V any] struct {
 	Value V       `json:"value"`
-	Score float32 `json:"score"`
+	Score float64 `json:"score"`
 }
 
 // BatchItem represents an item to be set in batch operations.
@@ -43,10 +47,29 @@ func New[K comparable, V any](opts ...options.Option[K, V]) (*SemanticCache[K, V
 		return nil, err
 	}
 
-	return NewSemanticCache(cfg.Backend, cfg.Provider, cfg.Comparator)
+	cache := &SemanticCache[K, V]{
+		backend:        cfg.Backend,
+		provider:       cfg.Provider,
+		comparator:     cfg.Comparator,
+		enableChunking: cfg.EnableChunking,
+	}
+
+	// Initialize chunker lazily only if chunking is enabled
+	if cfg.EnableChunking {
+		chunkerImpl, err := chunker.NewFixedOverlapChunker(cfg.ChunkConfig)
+		if err != nil {
+			// If chunker initialization fails, disable chunking gracefully
+			cache.enableChunking = false
+		} else {
+			cache.chunker = chunkerImpl
+		}
+	}
+
+	return cache, nil
 }
 
 // NewSemanticCache creates a new semantic cache with the given backend, provider, and comparator.
+// Chunking is enabled by default with sensible defaults.
 func NewSemanticCache[K comparable, V any](backend types.CacheBackend[K, V], provider types.EmbeddingProvider, comparator similarity.SimilarityFunc) (*SemanticCache[K, V], error) {
 	if backend == nil {
 		return nil, errors.New("backend cannot be nil")
@@ -58,24 +81,115 @@ func NewSemanticCache[K comparable, V any](backend types.CacheBackend[K, V], pro
 		return nil, errors.New("comparator cannot be nil")
 	}
 
-	return &SemanticCache[K, V]{
-		backend:    backend,
-		provider:   provider,
-		comparator: comparator,
-	}, nil
+	cache := &SemanticCache[K, V]{
+		backend:        backend,
+		provider:       provider,
+		comparator:     comparator,
+		enableChunking: true, // Enabled by default
+	}
+
+	// Initialize chunker with default config
+	chunkerImpl, err := chunker.NewFixedOverlapChunker(chunker.DefaultChunkConfig())
+	if err != nil {
+		// Gracefully disable chunking if initialization fails
+		cache.enableChunking = false
+	} else {
+		cache.chunker = chunkerImpl
+	}
+
+	return cache, nil
 }
 
 // Set stores or updates the entry for key with embedding computed from inputText.
+// If chunking is enabled and text exceeds token limits, it will be automatically chunked
+// and stored as separate entries with derived keys (key:chunk:0, key:chunk:1, etc.).
 func (sc *SemanticCache[K, V]) Set(ctx context.Context, key K, inputText string, value V) error {
 	if key == *new(K) { // Zero value check for K
 		return errors.New("key cannot be zero value")
 	}
+
+	// Check if chunking is needed
+	if sc.enableChunking && sc.chunker != nil {
+		// Try to chunk the text - if it results in multiple chunks, use chunking
+		chunks, chunkErr := sc.chunker.ChunkText(inputText)
+		if chunkErr == nil && len(chunks) > 1 {
+			// Text needs chunking - use the pre-computed chunks
+			return sc.setWithChunks(ctx, key, chunks, value)
+		}
+	}
+
+	// No chunking needed - store normally
 	embedding, err := sc.provider.EmbedText(inputText)
 	if err != nil {
 		return err
 	}
 	entry := types.Entry[V]{Embedding: embedding, Value: value}
 	return sc.backend.Set(ctx, key, entry)
+}
+
+// setWithChunks handles storing chunked text with an aggregate embedding
+func (sc *SemanticCache[K, V]) setWithChunks(ctx context.Context, key K, chunks []chunker.Chunk, value V) error {
+	// Extract chunk texts
+	chunkTexts := make([]string, len(chunks))
+	for i, chunk := range chunks {
+		chunkTexts[i] = chunk.Text
+	}
+
+	// Use batch embedding if available for better performance
+	var embeddings [][]float64
+	var embErr error
+	if batchProvider, ok := sc.provider.(types.BatchEmbeddingProvider); ok {
+		embeddings, embErr = batchProvider.EmbedBatch(chunkTexts)
+		if embErr != nil {
+			return fmt.Errorf("failed to batch embed chunks: %w", embErr)
+		}
+	} else {
+		// Fallback to individual embeddings
+		embeddings = make([][]float64, len(chunkTexts))
+		for i, text := range chunkTexts {
+			emb, err := sc.provider.EmbedText(text)
+			if err != nil {
+				return fmt.Errorf("failed to embed chunk %d: %w", i, err)
+			}
+			embeddings[i] = emb
+		}
+	}
+
+	// Create aggregate embedding by averaging all chunk embeddings
+	aggregateEmbedding := sc.aggregateEmbeddings(embeddings)
+
+	// Store single entry with aggregate embedding
+	entry := types.Entry[V]{Embedding: aggregateEmbedding, Value: value}
+	return sc.backend.Set(ctx, key, entry)
+}
+
+// aggregateEmbeddings combines multiple embeddings into a single embedding by averaging
+func (sc *SemanticCache[K, V]) aggregateEmbeddings(embeddings [][]float64) []float64 {
+	if len(embeddings) == 0 {
+		return nil
+	}
+	if len(embeddings) == 1 {
+		return embeddings[0]
+	}
+
+	// Get dimension from first embedding
+	dim := len(embeddings[0])
+	aggregate := make([]float64, dim)
+
+	// Sum all embeddings
+	for _, emb := range embeddings {
+		for i := 0; i < dim && i < len(emb); i++ {
+			aggregate[i] += emb[i]
+		}
+	}
+
+	// Average by dividing by count
+	count := float64(len(embeddings))
+	for i := range aggregate {
+		aggregate[i] /= count
+	}
+
+	return aggregate
 }
 
 // Get retrieves the value for key, if present.
@@ -113,7 +227,7 @@ func (sc *SemanticCache[K, V]) Len(ctx context.Context) (int, error) {
 }
 
 // Lookup returns the first value whose embedding similarity >= threshold.
-func (sc *SemanticCache[K, V]) Lookup(ctx context.Context, inputText string, threshold float32) (*Match[V], error) {
+func (sc *SemanticCache[K, V]) Lookup(ctx context.Context, inputText string, threshold float64) (*Match[V], error) {
 	embedding, err := sc.provider.EmbedText(inputText)
 	if err != nil {
 		return nil, err
@@ -302,7 +416,7 @@ type LookupResult[V any] struct {
 
 // LookupAsync performs semantic lookup asynchronously.
 // Returns a channel that will receive the result when complete.
-func (sc *SemanticCache[K, V]) LookupAsync(ctx context.Context, inputText string, threshold float32) <-chan LookupResult[V] {
+func (sc *SemanticCache[K, V]) LookupAsync(ctx context.Context, inputText string, threshold float64) <-chan LookupResult[V] {
 	resultCh := make(chan LookupResult[V], 1)
 	go func() {
 		defer close(resultCh)

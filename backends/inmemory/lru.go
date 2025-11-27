@@ -12,7 +12,7 @@ import (
 type LRUBackend[K comparable, V any] struct {
 	mu    *sync.RWMutex
 	cache *lru.Cache[K, types.Entry[V]]
-	index map[K][]float32
+	index map[K][]float64
 }
 
 // NewLRUBackend creates a new LRU backend
@@ -25,7 +25,7 @@ func NewLRUBackend[K comparable, V any](config types.BackendConfig) (*LRUBackend
 	return &LRUBackend[K, V]{
 		mu:    &sync.RWMutex{},
 		cache: lruCache,
-		index: make(map[K][]float32),
+		index: make(map[K][]float64),
 	}, nil
 }
 
@@ -74,7 +74,7 @@ func (b *LRUBackend[K, V]) Flush(ctx context.Context) error {
 	defer b.mu.Unlock()
 
 	b.cache.Purge()
-	b.index = make(map[K][]float32)
+	b.index = make(map[K][]float64)
 	return nil
 }
 
@@ -93,7 +93,7 @@ func (b *LRUBackend[K, V]) Keys(ctx context.Context) ([]K, error) {
 
 	// Clean up stale index entries and collect valid keys
 	keys := make([]K, 0, b.cache.Len())
-	validIndex := make(map[K][]float32)
+	validIndex := make(map[K][]float64)
 
 	for key, embedding := range b.index {
 		if b.cache.Contains(key) {
@@ -108,7 +108,7 @@ func (b *LRUBackend[K, V]) Keys(ctx context.Context) ([]K, error) {
 }
 
 // GetEmbedding retrieves just the embedding for a key
-func (b *LRUBackend[K, V]) GetEmbedding(ctx context.Context, key K) ([]float32, bool, error) {
+func (b *LRUBackend[K, V]) GetEmbedding(ctx context.Context, key K) ([]float64, bool, error) {
 	b.mu.RLock()
 	embedding, hasEmbedding := b.index[key]
 	cacheHasKey := b.cache.Contains(key)

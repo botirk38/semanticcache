@@ -11,7 +11,7 @@ import (
 type FIFOBackend[K comparable, V any] struct {
 	mu       *sync.RWMutex
 	entries  map[K]types.Entry[V]
-	index    map[K][]float32
+	index    map[K][]float64
 	queue    []K
 	capacity int
 }
@@ -21,7 +21,7 @@ func NewFIFOBackend[K comparable, V any](config types.BackendConfig) (*FIFOBacke
 	return &FIFOBackend[K, V]{
 		mu:       &sync.RWMutex{},
 		entries:  make(map[K]types.Entry[V]),
-		index:    make(map[K][]float32),
+		index:    make(map[K][]float64),
 		queue:    make([]K, 0, config.Capacity),
 		capacity: config.Capacity,
 	}, nil
@@ -102,7 +102,7 @@ func (b *FIFOBackend[K, V]) Flush(ctx context.Context) error {
 	defer b.mu.Unlock()
 
 	b.entries = make(map[K]types.Entry[V])
-	b.index = make(map[K][]float32)
+	b.index = make(map[K][]float64)
 	b.queue = make([]K, 0, b.capacity)
 	return nil
 }
@@ -128,7 +128,7 @@ func (b *FIFOBackend[K, V]) Keys(ctx context.Context) ([]K, error) {
 }
 
 // GetEmbedding retrieves just the embedding for a key
-func (b *FIFOBackend[K, V]) GetEmbedding(ctx context.Context, key K) ([]float32, bool, error) {
+func (b *FIFOBackend[K, V]) GetEmbedding(ctx context.Context, key K) ([]float64, bool, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 

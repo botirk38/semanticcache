@@ -193,15 +193,6 @@ func floatsToBytes(fs []float64) []byte {
 	return buf
 }
 
-// float32ToFloat64 converts float32 slice to float64 slice
-func float32ToFloat64(fs []float32) []float64 {
-	result := make([]float64, len(fs))
-	for i, f := range fs {
-		result[i] = float64(f)
-	}
-	return result
-}
-
 // Set stores an entry in Redis using JSON.SET
 func (b *RedisBackend[K, V]) Set(ctx context.Context, key K, entry types.Entry[V]) error {
 	redisKey := b.keyString(key)
@@ -209,7 +200,7 @@ func (b *RedisBackend[K, V]) Set(ctx context.Context, key K, entry types.Entry[V
 	doc := redisDocument[V]{
 		Key:       fmt.Sprintf("%v", key),
 		Value:     entry.Value,
-		Embedding: float32ToFloat64(entry.Embedding),
+		Embedding: entry.Embedding,
 		Timestamp: time.Now().Unix(),
 	}
 
@@ -245,14 +236,8 @@ func (b *RedisBackend[K, V]) Get(ctx context.Context, key K) (types.Entry[V], bo
 
 	doc := docs[0]
 
-	// Convert float64 back to float32
-	embedding := make([]float32, len(doc.Embedding))
-	for i, f := range doc.Embedding {
-		embedding[i] = float32(f)
-	}
-
 	entry := types.Entry[V]{
-		Embedding: embedding,
+		Embedding: doc.Embedding,
 		Value:     doc.Value,
 	}
 
@@ -371,7 +356,7 @@ func (b *RedisBackend[K, V]) Keys(ctx context.Context) ([]K, error) {
 }
 
 // GetEmbedding retrieves just the embedding for a key using JSON.GET
-func (b *RedisBackend[K, V]) GetEmbedding(ctx context.Context, key K) ([]float32, bool, error) {
+func (b *RedisBackend[K, V]) GetEmbedding(ctx context.Context, key K) ([]float64, bool, error) {
 	redisKey := b.keyString(key)
 
 	result, err := b.client.JSONGet(ctx, redisKey, "$.embedding").Result()
@@ -391,20 +376,13 @@ func (b *RedisBackend[K, V]) GetEmbedding(ctx context.Context, key K) ([]float32
 		return nil, false, nil
 	}
 
-	// Convert float64 back to float32
-	embedding := make([]float32, len(embeddings[0]))
-	for i, f := range embeddings[0] {
-		embedding[i] = float32(f)
-	}
-
-	return embedding, true, nil
+	return embeddings[0], true, nil
 }
 
 // VectorSearch performs vector similarity search using Redis FT.SEARCH
-func (b *RedisBackend[K, V]) VectorSearch(ctx context.Context, queryEmbedding []float32, threshold float32, limit int) ([]K, error) {
+func (b *RedisBackend[K, V]) VectorSearch(ctx context.Context, queryEmbedding []float64, threshold float64, limit int) ([]K, error) {
 	// Convert embedding to bytes for search
-	embedding64 := float32ToFloat64(queryEmbedding)
-	embeddingBytes := floatsToBytes(embedding64)
+	embeddingBytes := floatsToBytes(queryEmbedding)
 
 	// Perform vector search
 	query := fmt.Sprintf("*=>[KNN %d @embedding $vec AS vector_distance]", limit)
@@ -440,7 +418,7 @@ func (b *RedisBackend[K, V]) VectorSearch(ctx context.Context, queryEmbedding []
 		similarity := 1.0 - distance
 
 		// Check if similarity meets threshold
-		if float32(similarity) >= threshold {
+		if similarity >= threshold {
 			keyStr, ok := doc.Fields["key"]
 			if !ok {
 				continue
@@ -542,13 +520,9 @@ func (b *RedisBackend[K, V]) GetBatchAsync(ctx context.Context, keys []K) <-chan
 			}
 
 			doc := docs[0]
-			embedding := make([]float32, len(doc.Embedding))
-			for i, f := range doc.Embedding {
-				embedding[i] = float32(f)
-			}
 
 			entries[key] = types.Entry[V]{
-				Embedding: embedding,
+				Embedding: doc.Embedding,
 				Value:     doc.Value,
 			}
 		}

@@ -12,12 +12,12 @@ import (
 // Mock provider for testing
 type mockProvider struct {
 	shouldErr  bool
-	embeddings map[string][]float32
+	embeddings map[string][]float64
 }
 
 func newMockProvider() *mockProvider {
 	return &mockProvider{
-		embeddings: map[string][]float32{
+		embeddings: map[string][]float64{
 			"hello":            {1.0, 0.0, 0.0},
 			"world":            {0.0, 1.0, 0.0},
 			"test":             {0.0, 0.0, 1.0},
@@ -26,7 +26,7 @@ func newMockProvider() *mockProvider {
 	}
 }
 
-func (m *mockProvider) EmbedText(text string) ([]float32, error) {
+func (m *mockProvider) EmbedText(text string) ([]float64, error) {
 	if m.shouldErr {
 		return nil, &testError{"mock embedding error"}
 	}
@@ -34,7 +34,7 @@ func (m *mockProvider) EmbedText(text string) ([]float32, error) {
 		return embedding, nil
 	}
 	// Default embedding for unknown text
-	return []float32{0.5, 0.5, 0.5}, nil
+	return []float64{0.5, 0.5, 0.5}, nil
 }
 
 func (m *mockProvider) Close() {}
@@ -109,7 +109,7 @@ func (m *mockBackend[K, V]) Flush(ctx context.Context) error {
 	return nil
 }
 
-func (m *mockBackend[K, V]) GetEmbedding(ctx context.Context, key K) ([]float32, bool, error) {
+func (m *mockBackend[K, V]) GetEmbedding(ctx context.Context, key K) ([]float64, bool, error) {
 	if m.shouldErr {
 		return nil, false, &testError{"mock backend error"}
 	}
@@ -724,6 +724,103 @@ func TestWithDifferentTypes(t *testing.T) {
 		}
 		if value.Name != "John" || value.Age != 30 {
 			t.Errorf("Expected {John 30}, got %+v", value)
+		}
+	})
+}
+
+// Test chunking functionality
+func TestChunkingIntegration(t *testing.T) {
+	t.Run("ChunkingEnabledByDefault", func(t *testing.T) {
+		cache, err := New[string, string](
+			options.WithLRUBackend[string, string](100),
+			options.WithCustomProvider[string, string](newMockProvider()),
+		)
+		if err != nil {
+			t.Fatalf("Failed to create cache: %v", err)
+		}
+		defer cache.Close()
+
+		// Chunking should be enabled by default
+		if !cache.enableChunking {
+			t.Error("Expected chunking to be enabled by default")
+		}
+		if cache.chunker == nil {
+			t.Error("Expected chunker to be initialized")
+		}
+	})
+
+	t.Run("ChunkingCanBeDisabled", func(t *testing.T) {
+		cache, err := New[string, string](
+			options.WithLRUBackend[string, string](100),
+			options.WithCustomProvider[string, string](newMockProvider()),
+			options.WithoutChunking[string, string](),
+		)
+		if err != nil {
+			t.Fatalf("Failed to create cache: %v", err)
+		}
+		defer cache.Close()
+
+		// Chunking should be disabled
+		if cache.enableChunking {
+			t.Error("Expected chunking to be disabled")
+		}
+	})
+
+	t.Run("AggregateEmbeddingsEmpty", func(t *testing.T) {
+		cache := &SemanticCache[string, string]{}
+
+		result := cache.aggregateEmbeddings(nil)
+		if result != nil {
+			t.Error("Expected nil for nil embeddings")
+		}
+
+		result = cache.aggregateEmbeddings([][]float64{})
+		if result != nil {
+			t.Error("Expected nil for empty slice")
+		}
+	})
+
+	t.Run("AggregateEmbeddingsSingle", func(t *testing.T) {
+		cache := &SemanticCache[string, string]{}
+
+		single := [][]float64{{0.1, 0.2, 0.3}}
+		result := cache.aggregateEmbeddings(single)
+
+		if len(result) != 3 {
+			t.Fatalf("Expected length 3, got %d", len(result))
+		}
+		for i, v := range result {
+			if v != single[0][i] {
+				t.Errorf("Expected %f at index %d, got %f", single[0][i], i, v)
+			}
+		}
+	})
+
+	t.Run("AggregateEmbeddingsMultiple", func(t *testing.T) {
+		cache := &SemanticCache[string, string]{}
+
+		embeddings := [][]float64{
+			{0.2, 0.4, 0.6},
+			{0.4, 0.6, 0.8},
+			{0.6, 0.8, 1.0},
+		}
+		result := cache.aggregateEmbeddings(embeddings)
+
+		if len(result) != 3 {
+			t.Fatalf("Expected length 3, got %d", len(result))
+		}
+
+		// Expected: average of each dimension
+		expected := []float64{0.4, 0.6, 0.8}
+		epsilon := 0.0001
+		for i, v := range result {
+			diff := v - expected[i]
+			if diff < 0 {
+				diff = -diff
+			}
+			if diff > epsilon {
+				t.Errorf("Expected %f at index %d, got %f", expected[i], i, v)
+			}
 		}
 	})
 }
