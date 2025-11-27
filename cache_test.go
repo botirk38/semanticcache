@@ -738,7 +738,7 @@ func TestChunkingIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create cache: %v", err)
 		}
-		defer cache.Close()
+		defer func() { _ = cache.Close() }()
 
 		// Chunking should be enabled by default
 		if !cache.enableChunking {
@@ -753,14 +753,12 @@ func TestChunkingIntegration(t *testing.T) {
 		cache, err := New[string, string](
 			options.WithLRUBackend[string, string](100),
 			options.WithCustomProvider[string, string](newMockProvider()),
-			options.WithoutChunking[string, string](),
+			options.WithChunking[string, string](false),
 		)
 		if err != nil {
 			t.Fatalf("Failed to create cache: %v", err)
 		}
-		defer cache.Close()
-
-		// Chunking should be disabled
+		defer func() { _ = cache.Close() }()
 		if cache.enableChunking {
 			t.Error("Expected chunking to be disabled")
 		}

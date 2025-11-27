@@ -162,22 +162,19 @@ func WithSimilarityComparator[K comparable, V any](comparator similarity.Similar
 	}
 }
 
-// WithChunking enables automatic text chunking with custom configuration
-func WithChunking[K comparable, V any](config chunker.ChunkConfig) Option[K, V] {
+// WithChunking enables or disables automatic text chunking
+// When enabled=true with no config, uses default configuration
+// When enabled=true with config, uses provided configuration
+// When enabled=false, disables chunking regardless of config
+func WithChunking[K comparable, V any](enabled bool, config ...chunker.ChunkConfig) Option[K, V] {
 	return func(cfg *Config[K, V]) error {
-		if err := config.Validate(); err != nil {
-			return err
+		cfg.EnableChunking = enabled
+		if enabled && len(config) > 0 {
+			if err := config[0].Validate(); err != nil {
+				return err
+			}
+			cfg.ChunkConfig = config[0]
 		}
-		cfg.ChunkConfig = config
-		cfg.EnableChunking = true
-		return nil
-	}
-}
-
-// WithoutChunking disables automatic text chunking
-func WithoutChunking[K comparable, V any]() Option[K, V] {
-	return func(cfg *Config[K, V]) error {
-		cfg.EnableChunking = false
 		return nil
 	}
 }
