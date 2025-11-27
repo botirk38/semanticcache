@@ -1,6 +1,6 @@
 module github.com/botirk38/semanticcache
 
-go 1.24.2
+go 1.25.3
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.19.0
