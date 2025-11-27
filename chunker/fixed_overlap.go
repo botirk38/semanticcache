@@ -61,19 +61,17 @@ func (c *FixedOverlapChunker) ChunkText(text string) ([]Chunk, error) {
 
 	totalTokens := len(tokens)
 
-	// If text fits within chunk size, return single chunk
-	if totalTokens <= c.config.ChunkSize {
-		return []Chunk{
-			{
-				Text:       text,
-				StartToken: 0,
-				EndToken:   totalTokens,
-				Index:      0,
-			},
-		}, nil
+	// If text fits within MaxTokens, return single chunk (no chunking needed)
+	if totalTokens <= c.config.MaxTokens {
+		return []Chunk{{
+			Text:       text,
+			StartToken: 0,
+			EndToken:   totalTokens,
+			Index:      0,
+		}}, nil
 	}
 
-	// Calculate number of chunks needed
+	// Calculate stride for overlapping chunks
 	stride := c.config.ChunkSize - c.config.ChunkOverlap
 	if stride <= 0 {
 		stride = c.config.ChunkSize // Fallback if overlap is misconfigured
@@ -111,4 +109,9 @@ func (c *FixedOverlapChunker) ChunkText(text string) ([]Chunk, error) {
 	}
 
 	return chunks, nil
+}
+
+// GetMaxTokens returns the maximum token limit for this chunker.
+func (c *FixedOverlapChunker) GetMaxTokens() int {
+	return c.config.MaxTokens
 }

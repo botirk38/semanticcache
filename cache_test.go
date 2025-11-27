@@ -39,6 +39,11 @@ func (m *mockProvider) EmbedText(text string) ([]float64, error) {
 
 func (m *mockProvider) Close() {}
 
+// GetMaxTokens returns a mock token limit for testing
+func (m *mockProvider) GetMaxTokens() int {
+	return 1000 // Mock token limit for testing
+}
+
 // Mock backend for testing
 type mockBackend[K comparable, V any] struct {
 	data      map[K]types.Entry[V]

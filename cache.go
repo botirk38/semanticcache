@@ -56,6 +56,10 @@ func New[K comparable, V any](opts ...options.Option[K, V]) (*SemanticCache[K, V
 
 	// Initialize chunker lazily only if chunking is enabled
 	if cfg.EnableChunking {
+		// Auto-configure MaxTokens from provider if not explicitly set
+		if cfg.ChunkConfig.MaxTokens == 0 {
+			cfg.ChunkConfig.MaxTokens = cfg.Provider.GetMaxTokens()
+		}
 		chunkerImpl, err := chunker.NewFixedOverlapChunker(cfg.ChunkConfig)
 		if err != nil {
 			// If chunker initialization fails, disable chunking gracefully
@@ -110,11 +114,15 @@ func (sc *SemanticCache[K, V]) Set(ctx context.Context, key K, inputText string,
 
 	// Check if chunking is needed
 	if sc.enableChunking && sc.chunker != nil {
-		// Try to chunk the text - if it results in multiple chunks, use chunking
-		chunks, chunkErr := sc.chunker.ChunkText(inputText)
-		if chunkErr == nil && len(chunks) > 1 {
-			// Text needs chunking - use the pre-computed chunks
-			return sc.setWithChunks(ctx, key, chunks, value)
+		// Count tokens first to check if chunking is necessary
+		tokenCount, err := sc.chunker.CountTokens(inputText)
+		if err == nil && tokenCount > sc.chunker.GetMaxTokens() {
+			// Only chunk if text exceeds the embedding model's token limit
+			chunks, chunkErr := sc.chunker.ChunkText(inputText)
+			if chunkErr == nil && len(chunks) > 1 {
+				// Text needs chunking - use the pre-computed chunks
+				return sc.setWithChunks(ctx, key, chunks, value)
+			}
 		}
 	}
 

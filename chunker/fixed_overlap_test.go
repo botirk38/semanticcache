@@ -112,15 +112,25 @@ func TestFixedOverlapChunker_ChunkText(t *testing.T) {
 
 	t.Run("text requires multiple chunks", func(t *testing.T) {
 		config := ChunkConfig{
-			MaxTokens:    8191,
-			ChunkSize:    20, // Small chunk size to force multiple chunks
+			MaxTokens:    50, // Low limit to force chunking
+			ChunkSize:    20,
 			ChunkOverlap: 5,
 			Strategy:     FixedSizeOverlap,
 		}
 		chunker, _ := NewFixedOverlapChunker(config)
 
-		// Create text that will definitely need chunking
-		text := strings.Repeat("This is a test sentence. ", 50)
+		// Create text that exceeds MaxTokens
+		text := strings.Repeat("This is a test sentence. ", 10) // Should exceed 50 tokens
+
+		tokenCount, err := chunker.CountTokens(text)
+		if err != nil {
+			t.Fatalf("CountTokens() error = %v", err)
+		}
+
+		// Verify text exceeds MaxTokens
+		if tokenCount <= config.MaxTokens {
+			t.Fatalf("test setup error: text has %d tokens, should exceed MaxTokens %d", tokenCount, config.MaxTokens)
+		}
 
 		chunks, err := chunker.ChunkText(text)
 		if err != nil {
@@ -129,7 +139,7 @@ func TestFixedOverlapChunker_ChunkText(t *testing.T) {
 
 		// Should have multiple chunks
 		if len(chunks) <= 1 {
-			t.Errorf("expected multiple chunks, got %d", len(chunks))
+			t.Errorf("expected multiple chunks for %d tokens (>%d limit), got %d", tokenCount, config.MaxTokens, len(chunks))
 		}
 
 		// Verify chunk properties
@@ -185,11 +195,11 @@ func TestFixedOverlapChunker_ChunkText(t *testing.T) {
 	})
 }
 
-func TestFixedOverlapChunker_Integration(t *testing.T) {
+func TestFixedOverlapChunker_GetMaxTokens(t *testing.T) {
 	config := ChunkConfig{
-		MaxTokens:    100,
-		ChunkSize:    30,
-		ChunkOverlap: 10,
+		MaxTokens:    5000,
+		ChunkSize:    512,
+		ChunkOverlap: 50,
 		Strategy:     FixedSizeOverlap,
 	}
 	chunker, err := NewFixedOverlapChunker(config)
@@ -197,40 +207,135 @@ func TestFixedOverlapChunker_Integration(t *testing.T) {
 		t.Fatalf("failed to create chunker: %v", err)
 	}
 
-	// Create a long text
-	text := strings.Repeat("Lorem ipsum dolor sit amet, consectetur adipiscing elit. ", 20)
-
-	// Count tokens
-	tokenCount, err := chunker.CountTokens(text)
-	if err != nil {
-		t.Fatalf("CountTokens() error = %v", err)
+	if chunker.GetMaxTokens() != 5000 {
+		t.Errorf("GetMaxTokens() = %d, want 5000", chunker.GetMaxTokens())
 	}
+}
 
-	// Chunk the text
-	chunks, err := chunker.ChunkText(text)
-	if err != nil {
-		t.Fatalf("ChunkText() error = %v", err)
-	}
-
-	// If text exceeds chunk size, should have multiple chunks
-	if tokenCount > config.ChunkSize {
-		if len(chunks) <= 1 {
-			t.Errorf("expected multiple chunks for %d tokens, got %d chunks", tokenCount, len(chunks))
+func TestFixedOverlapChunker_ChunkingOnlyWhenExceedsMaxTokens(t *testing.T) {
+	t.Run("text within MaxTokens returns single chunk", func(t *testing.T) {
+		config := ChunkConfig{
+			MaxTokens:    100, // Low limit to force chunking decision
+			ChunkSize:    50,
+			ChunkOverlap: 10,
+			Strategy:     FixedSizeOverlap,
 		}
-	}
+		chunker, _ := NewFixedOverlapChunker(config)
 
-	// Verify each chunk
-	for i, chunk := range chunks {
-		chunkTokens, err := chunker.CountTokens(chunk.Text)
+		// Create short text that fits within MaxTokens
+		shortText := "This is a short text."
+		tokenCount, err := chunker.CountTokens(shortText)
 		if err != nil {
-			t.Fatalf("failed to count tokens in chunk %d: %v", i, err)
+			t.Fatalf("CountTokens() error = %v", err)
 		}
 
-		// Each chunk (except possibly the last) should be close to ChunkSize
-		if i < len(chunks)-1 {
-			if chunkTokens > config.ChunkSize {
-				t.Errorf("chunk %d has %d tokens, exceeds ChunkSize %d", i, chunkTokens, config.ChunkSize)
+		// Verify text is within MaxTokens
+		if tokenCount > config.MaxTokens {
+			t.Fatalf("test setup error: short text has %d tokens, exceeds MaxTokens %d", tokenCount, config.MaxTokens)
+		}
+
+		chunks, err := chunker.ChunkText(shortText)
+		if err != nil {
+			t.Fatalf("ChunkText() error = %v", err)
+		}
+
+		// Should return exactly one chunk
+		if len(chunks) != 1 {
+			t.Errorf("expected 1 chunk for text within MaxTokens, got %d", len(chunks))
+		}
+
+		if chunks[0].Text != shortText {
+			t.Errorf("chunk text should match original text")
+		}
+	})
+
+	t.Run("text exceeding MaxTokens gets chunked", func(t *testing.T) {
+		config := ChunkConfig{
+			MaxTokens:    50, // Low limit to force chunking
+			ChunkSize:    25,
+			ChunkOverlap: 5,
+			Strategy:     FixedSizeOverlap,
+		}
+		chunker, _ := NewFixedOverlapChunker(config)
+
+		// Create long text that exceeds MaxTokens
+		longText := strings.Repeat("This is a longer sentence that will exceed the token limit. ", 10)
+		tokenCount, err := chunker.CountTokens(longText)
+		if err != nil {
+			t.Fatalf("CountTokens() error = %v", err)
+		}
+
+		// Verify text exceeds MaxTokens
+		if tokenCount <= config.MaxTokens {
+			t.Fatalf("test setup error: long text has %d tokens, should exceed MaxTokens %d", tokenCount, config.MaxTokens)
+		}
+
+		chunks, err := chunker.ChunkText(longText)
+		if err != nil {
+			t.Fatalf("ChunkText() error = %v", err)
+		}
+
+		// Should return multiple chunks
+		if len(chunks) <= 1 {
+			t.Errorf("expected multiple chunks for text exceeding MaxTokens (%d tokens > %d limit), got %d chunks",
+				tokenCount, config.MaxTokens, len(chunks))
+		}
+
+		// Verify all chunks are properly formed
+		for i, chunk := range chunks {
+			if chunk.Index != i {
+				t.Errorf("chunk %d has wrong index: got %d, want %d", i, chunk.Index, i)
+			}
+			if chunk.Text == "" {
+				t.Errorf("chunk %d has empty text", i)
 			}
 		}
-	}
+	})
+
+	t.Run("chunking respects MaxTokens threshold", func(t *testing.T) {
+		config := ChunkConfig{
+			MaxTokens:    100,
+			ChunkSize:    50,
+			ChunkOverlap: 10,
+			Strategy:     FixedSizeOverlap,
+		}
+		chunker, _ := NewFixedOverlapChunker(config)
+
+		// Test various text lengths around the MaxTokens threshold
+		testCases := []struct {
+			name        string
+			text        string
+			expectChunk bool
+		}{
+			{"well under limit", "Short text.", false},
+			{"at limit", strings.Repeat("word ", 20), false},   // Approximately at limit
+			{"over limit", strings.Repeat("word ", 200), true}, // Definitely over limit
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				tokenCount, err := chunker.CountTokens(tc.text)
+				if err != nil {
+					t.Fatalf("CountTokens() error = %v", err)
+				}
+
+				chunks, err := chunker.ChunkText(tc.text)
+				if err != nil {
+					t.Fatalf("ChunkText() error = %v", err)
+				}
+
+				if tc.expectChunk {
+					if len(chunks) <= 1 {
+						t.Errorf("expected multiple chunks for %d tokens (>%d limit), got %d chunks",
+							tokenCount, config.MaxTokens, len(chunks))
+					}
+				} else {
+					if len(chunks) != 1 {
+						t.Errorf("expected single chunk for %d tokens (<=%d limit), got %d chunks",
+							tokenCount, config.MaxTokens, len(chunks))
+					}
+				}
+			})
+		}
+	})
 }

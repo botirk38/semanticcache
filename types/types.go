@@ -100,6 +100,8 @@ type EmbeddingProvider interface {
 	EmbedText(text string) ([]float64, error)
 	// Close frees any resources held by the provider.
 	Close()
+	// GetMaxTokens returns the maximum number of tokens this provider can handle.
+	GetMaxTokens() int
 }
 
 // BatchEmbeddingProvider is an optional interface that providers can implement

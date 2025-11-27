@@ -20,6 +20,10 @@ func (m *mockProvider) EmbedText(text string) ([]float64, error) {
 	return []float64{0.1, 0.2, 0.3}, nil
 }
 
+func (m *mockProvider) GetMaxTokens() int {
+	return 8191 // Default OpenAI limit
+}
+
 func (m *mockProvider) Close() {}
 
 type testError struct {

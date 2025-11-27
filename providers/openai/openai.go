@@ -13,6 +13,13 @@ const (
 	DefaultOpenAIModel = openai.EmbeddingModelTextEmbedding3Small
 )
 
+// OpenAI model-specific token limits
+var openAIModelLimits = map[string]int{
+	openai.EmbeddingModelTextEmbedding3Small: 8191,
+	openai.EmbeddingModelTextEmbedding3Large: 8191,
+	openai.EmbeddingModelTextEmbeddingAda002: 8191,
+}
+
 // OpenAIProvider uses OpenAI's API to embed text.
 type OpenAIProvider struct {
 	client *openai.Client
@@ -111,3 +118,11 @@ func (p *OpenAIProvider) EmbedBatch(texts []string) ([][]float64, error) {
 }
 
 func (p *OpenAIProvider) Close() {}
+
+// GetMaxTokens returns the maximum number of tokens this OpenAI model can handle.
+func (p *OpenAIProvider) GetMaxTokens() int {
+	if limit, ok := openAIModelLimits[p.model]; ok {
+		return limit
+	}
+	return 8191 // Safe default for unknown models
+}

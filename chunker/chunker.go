@@ -11,6 +11,9 @@ type Chunker interface {
 	// CountTokens counts the number of tokens in the given text.
 	// This delegates to the underlying tokenizer.
 	CountTokens(text string) (int, error)
+
+	// GetMaxTokens returns the maximum token limit for this chunker.
+	GetMaxTokens() int
 }
 
 // ChunkConfig holds configuration for text chunking behavior.
