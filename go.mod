@@ -8,7 +8,7 @@ require (
 	github.com/openai/openai-go/v2 v2.7.1
 	github.com/redis/go-redis/v9 v9.17.1
 	github.com/tiktoken-go/tokenizer v0.7.0
-	google.golang.org/genai v1.36.0
+	google.golang.org/genai v1.37.0
 )
 
 require (
