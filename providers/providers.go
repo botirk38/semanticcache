@@ -1,3 +1,4 @@
+// Package providers re-exports the concrete provider constructors.
 package providers
 
 import (
@@ -5,7 +6,7 @@ import (
 	"github.com/botirk38/semanticcache/types"
 )
 
-// NewOpenAIProvider creates a new OpenAI provider
+// NewOpenAIProvider creates a new OpenAI embedding provider.
 func NewOpenAIProvider(config openai.OpenAIConfig) (types.EmbeddingProvider, error) {
 	return openai.NewOpenAIProvider(config)
 }

@@ -1,127 +1,75 @@
+// Package types defines the core interfaces and types for the semantic cache.
 package types
 
-import (
-	"context"
-	"time"
-)
+import "context"
 
-// Entry holds an embedding and its associated value.
+// Entry holds an embedding vector alongside its cached value.
 type Entry[V any] struct {
 	Embedding []float64
 	Value     V
 }
 
-// CacheBackend defines the interface for different cache storage backends.
-// This allows for pluggable storage systems including in-memory and Redis.
-type CacheBackend[K comparable, V any] interface {
-	// Set stores a value with its embedding in the cache
-	Set(ctx context.Context, key K, entry Entry[V]) error
+// Backend is the storage interface that every cache backend must implement.
+type Backend[K comparable, V any] interface {
+	// Set stores a value with its embedding vector.
+	Set(ctx context.Context, key K, embedding []float64, value V) error
 
-	// Get retrieves an entry by key
-	Get(ctx context.Context, key K) (Entry[V], bool, error)
+	// Get retrieves the value for a key.
+	Get(ctx context.Context, key K) (V, bool, error)
 
-	// Delete removes an entry by key
+	// Delete removes an entry by key.
 	Delete(ctx context.Context, key K) error
 
-	// Contains checks if a key exists without retrieving the value
+	// Contains checks whether a key exists without retrieving the value.
 	Contains(ctx context.Context, key K) (bool, error)
 
-	// Flush clears all entries from the cache
-	Flush(ctx context.Context) error
-
-	// Len returns the number of entries in the cache
-	Len(ctx context.Context) (int, error)
-
-	// Keys returns all keys in the cache (for semantic search)
+	// Keys returns all keys currently stored.
 	Keys(ctx context.Context) ([]K, error)
 
-	// GetEmbedding retrieves just the embedding for a key
+	// GetEmbedding retrieves the embedding vector for a key.
 	GetEmbedding(ctx context.Context, key K) ([]float64, bool, error)
 
-	// Close closes the backend and releases resources
+	// Flush removes all entries.
+	Flush(ctx context.Context) error
+
+	// Len returns the number of stored entries.
+	Len(ctx context.Context) (int, error)
+
+	// Close releases any resources held by the backend.
 	Close() error
-
-	// Async operations
-	// SetAsync stores a value asynchronously
-	SetAsync(ctx context.Context, key K, entry Entry[V]) <-chan error
-
-	// GetAsync retrieves an entry asynchronously
-	GetAsync(ctx context.Context, key K) <-chan AsyncGetResult[V]
-
-	// DeleteAsync removes an entry asynchronously
-	DeleteAsync(ctx context.Context, key K) <-chan error
-
-	// GetBatchAsync retrieves multiple entries asynchronously
-	GetBatchAsync(ctx context.Context, keys []K) <-chan AsyncBatchResult[K, V]
 }
 
-// AsyncGetResult holds the result of an async Get operation at the backend level.
-type AsyncGetResult[V any] struct {
-	Entry Entry[V]
-	Found bool
-	Error error
+// VectorSearchResult is a single hit returned by a VectorSearcher.
+type VectorSearchResult[K comparable, V any] struct {
+	Key   K
+	Value V
+	Score float64
 }
 
-// AsyncBatchResult holds the result of an async batch operation.
-type AsyncBatchResult[K comparable, V any] struct {
-	Entries map[K]Entry[V]
-	Error   error
+// VectorSearcher performs server-side similarity search. Backends like
+// Redis that have native vector-search capabilities implement this
+// in addition to Backend. When present, Lookup and TopMatches use it
+// instead of scanning all keys client-side.
+type VectorSearcher[K comparable, V any] interface {
+	// VectorSearch returns up to limit results whose similarity to query
+	// meets or exceeds threshold, sorted by descending score.
+	VectorSearch(ctx context.Context, query []float64, threshold float64, limit int) ([]VectorSearchResult[K, V], error)
 }
 
-// BackendConfig provides configuration options for backends
-type BackendConfig struct {
-	// For in-memory caches
-	Capacity int
-	TTL      time.Duration
-
-	// For Redis
-	ConnectionString string
-	Username         string
-	Password         string
-	Database         int
-
-	// Additional options
-	Options map[string]any
-}
-
-// BackendType represents the type of cache backend
-type BackendType string
-
-const (
-	BackendLRU   BackendType = "lru"
-	BackendFIFO  BackendType = "fifo"
-	BackendLFU   BackendType = "lfu"
-	BackendRedis BackendType = "redis"
-)
-
-// EmbeddingProvider defines the interface all embedding providers must satisfy.
+// EmbeddingProvider turns text into embedding vectors.
 type EmbeddingProvider interface {
-	// EmbedText turns a piece of text into its embedding vector.
-	EmbedText(text string) ([]float64, error)
-	// Close frees any resources held by the provider.
-	Close()
-	// GetMaxTokens returns the maximum number of tokens this provider can handle.
-	GetMaxTokens() int
+	// EmbedText computes the embedding vector for a single piece of text.
+	EmbedText(ctx context.Context, text string) ([]float64, error)
+
+	// Close releases any resources held by the provider.
+	Close() error
 }
 
-// BatchEmbeddingProvider is an optional interface that providers can implement
-// to support efficient batch embedding operations. If a provider implements this,
-// the cache will use it for better performance when embedding multiple chunks.
+// BatchEmbeddingProvider is an optional extension for providers that
+// support embedding multiple texts in a single API call.
 type BatchEmbeddingProvider interface {
 	EmbeddingProvider
-	// EmbedBatch embeds multiple texts in a single operation.
-	// This is more efficient than calling EmbedText multiple times.
-	EmbedBatch(texts []string) ([][]float64, error)
+
+	// EmbedBatch embeds multiple texts in one operation.
+	EmbedBatch(ctx context.Context, texts []string) ([][]float64, error)
 }
-
-// ProviderType represents the type of embedding provider
-type ProviderType string
-
-const (
-	ProviderOpenAI ProviderType = "openai"
-	// Add more providers as needed:
-	// ProviderAnthropic   ProviderType = "anthropic"
-	// ProviderOllama      ProviderType = "ollama"
-	// ProviderHuggingFace ProviderType = "huggingface"
-	// ProviderCohere      ProviderType = "cohere"
-)

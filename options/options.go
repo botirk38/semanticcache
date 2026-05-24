@@ -1,38 +1,33 @@
-// Package options provides functional options for configuring SemanticCache instances.
+// Package options provides functional options for configuring SemanticCache.
 package options
 
 import (
-	"errors"
-
-	"github.com/botirk38/semanticcache/backends"
-	"github.com/botirk38/semanticcache/chunker"
+	"github.com/botirk38/semanticcache/backends/inmemory"
+	"github.com/botirk38/semanticcache/backends/remote"
+	scerrors "github.com/botirk38/semanticcache/errors"
 	"github.com/botirk38/semanticcache/providers/openai"
 	"github.com/botirk38/semanticcache/similarity"
 	"github.com/botirk38/semanticcache/types"
 )
 
-// Option represents a configuration option for SemanticCache
+// Option configures a cache instance.
 type Option[K comparable, V any] func(*Config[K, V]) error
 
-// Config holds the configuration for building a SemanticCache
+// Config holds the resolved configuration for building a cache.
 type Config[K comparable, V any] struct {
-	Backend        types.CacheBackend[K, V]
-	Provider       types.EmbeddingProvider
-	Comparator     similarity.SimilarityFunc
-	ChunkConfig    chunker.ChunkConfig
-	EnableChunking bool
+	Backend    types.Backend[K, V]
+	Provider   types.EmbeddingProvider
+	Comparator similarity.SimilarityFunc
 }
 
-// NewConfig creates a new configuration with default values
+// NewConfig returns a Config with sensible defaults.
 func NewConfig[K comparable, V any]() *Config[K, V] {
 	return &Config[K, V]{
-		Comparator:     similarity.CosineSimilarity,
-		ChunkConfig:    chunker.DefaultChunkConfig(),
-		EnableChunking: true, // Enabled by default with sensible defaults
+		Comparator: similarity.CosineSimilarity,
 	}
 }
 
-// Apply applies all the given options to the config
+// Apply applies all options to the config.
 func (c *Config[K, V]) Apply(opts ...Option[K, V]) error {
 	for _, opt := range opts {
 		if err := opt(c); err != nil {
@@ -42,139 +37,117 @@ func (c *Config[K, V]) Apply(opts ...Option[K, V]) error {
 	return nil
 }
 
-// Validate checks if the configuration is valid
+// Validate checks that the config has the required fields.
 func (c *Config[K, V]) Validate() error {
 	if c.Backend == nil {
-		return errors.New("backend is required - use WithLRUBackend, WithRedisBackend, etc")
+		return scerrors.ErrNilBackend
 	}
 	if c.Provider == nil {
-		return errors.New("embedding provider is required - use WithOpenAIProvider, etc")
+		return scerrors.ErrNilProvider
 	}
 	return nil
 }
 
-// WithLRUBackend sets up an LRU in-memory backend
+// ---------- backend options ----------
+
+// WithLRUBackend sets up an LRU in-memory backend.
 func WithLRUBackend[K comparable, V any](capacity int) Option[K, V] {
 	return func(cfg *Config[K, V]) error {
-		backend, err := backends.NewLRUBackend[K, V](types.BackendConfig{
-			Capacity: capacity,
-		})
+		b, err := inmemory.NewLRUBackend[K, V](capacity)
 		if err != nil {
 			return err
 		}
-		cfg.Backend = backend
+		cfg.Backend = b
 		return nil
 	}
 }
 
-// WithFIFOBackend sets up a FIFO in-memory backend
+// WithFIFOBackend sets up a FIFO in-memory backend.
 func WithFIFOBackend[K comparable, V any](capacity int) Option[K, V] {
 	return func(cfg *Config[K, V]) error {
-		backend, err := backends.NewFIFOBackend[K, V](types.BackendConfig{
-			Capacity: capacity,
-		})
+		b, err := inmemory.NewFIFOBackend[K, V](capacity)
 		if err != nil {
 			return err
 		}
-		cfg.Backend = backend
+		cfg.Backend = b
 		return nil
 	}
 }
 
-// WithLFUBackend sets up an LFU in-memory backend
+// WithLFUBackend sets up an LFU in-memory backend.
 func WithLFUBackend[K comparable, V any](capacity int) Option[K, V] {
 	return func(cfg *Config[K, V]) error {
-		backend, err := backends.NewLFUBackend[K, V](types.BackendConfig{
-			Capacity: capacity,
-		})
+		b, err := inmemory.NewLFUBackend[K, V](capacity)
 		if err != nil {
 			return err
 		}
-		cfg.Backend = backend
+		cfg.Backend = b
 		return nil
 	}
 }
 
-// WithRedisBackend sets up a Redis backend
-func WithRedisBackend[K comparable, V any](addr string, db int) Option[K, V] {
+// WithRedisBackend sets up a Redis backend. addr can be "host:port" or a
+// redis:// URL. Use remote.With* options for password, prefix, dimensions, etc.
+func WithRedisBackend[K comparable, V any](addr string, opts ...remote.RedisOption) Option[K, V] {
 	return func(cfg *Config[K, V]) error {
-		backend, err := backends.NewRedisBackend[K, V](types.BackendConfig{
-			ConnectionString: addr,
-			Database:         db,
-		})
+		b, err := remote.NewRedisBackend[K, V](addr, opts...)
 		if err != nil {
 			return err
 		}
-		cfg.Backend = backend
+		cfg.Backend = b
 		return nil
 	}
 }
 
-// WithCustomBackend allows using a pre-configured backend
-func WithCustomBackend[K comparable, V any](backend types.CacheBackend[K, V]) Option[K, V] {
+// WithCustomBackend uses a pre-constructed backend.
+func WithCustomBackend[K comparable, V any](backend types.Backend[K, V]) Option[K, V] {
 	return func(cfg *Config[K, V]) error {
 		if backend == nil {
-			return errors.New("backend cannot be nil")
+			return scerrors.ErrNilBackend
 		}
 		cfg.Backend = backend
 		return nil
 	}
 }
 
-// WithOpenAIProvider sets up OpenAI embedding provider
+// ---------- provider options ----------
+
+// WithOpenAIProvider sets up an OpenAI embedding provider.
 func WithOpenAIProvider[K comparable, V any](apiKey string, model ...string) Option[K, V] {
 	return func(cfg *Config[K, V]) error {
-		config := openai.OpenAIConfig{
-			APIKey: apiKey,
-		}
+		c := openai.OpenAIConfig{APIKey: apiKey}
 		if len(model) > 0 {
-			config.Model = model[0]
+			c.Model = model[0]
 		}
-
-		provider, err := openai.NewOpenAIProvider(config)
+		p, err := openai.NewOpenAIProvider(c)
 		if err != nil {
 			return err
 		}
-		cfg.Provider = provider
+		cfg.Provider = p
 		return nil
 	}
 }
 
-// WithCustomProvider allows using a pre-configured embedding provider
+// WithCustomProvider uses a pre-constructed embedding provider.
 func WithCustomProvider[K comparable, V any](provider types.EmbeddingProvider) Option[K, V] {
 	return func(cfg *Config[K, V]) error {
 		if provider == nil {
-			return errors.New("provider cannot be nil")
+			return scerrors.ErrNilProvider
 		}
 		cfg.Provider = provider
 		return nil
 	}
 }
 
-// WithSimilarityComparator sets a custom similarity function
+// ---------- similarity options ----------
+
+// WithSimilarityComparator sets a custom similarity function.
 func WithSimilarityComparator[K comparable, V any](comparator similarity.SimilarityFunc) Option[K, V] {
 	return func(cfg *Config[K, V]) error {
 		if comparator == nil {
-			return errors.New("comparator cannot be nil")
+			return scerrors.ErrNilComparator
 		}
 		cfg.Comparator = comparator
-		return nil
-	}
-}
-
-// WithChunking enables or disables automatic text chunking
-// When enabled=true with no config, uses default configuration
-// When enabled=true with config, uses provided configuration
-// When enabled=false, disables chunking regardless of config
-func WithChunking[K comparable, V any](enabled bool, config ...chunker.ChunkConfig) Option[K, V] {
-	return func(cfg *Config[K, V]) error {
-		cfg.EnableChunking = enabled
-		if enabled && len(config) > 0 {
-			if err := config[0].Validate(); err != nil {
-				return err
-			}
-			cfg.ChunkConfig = config[0]
-		}
 		return nil
 	}
 }
