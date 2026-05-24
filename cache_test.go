@@ -671,6 +671,50 @@ func TestClose(t *testing.T) {
 	}
 }
 
+func TestClosedCacheGuard(t *testing.T) {
+	ctx := context.Background()
+	cache, err := New(
+		options.WithCustomBackend(newMockBackend[string, string]()),
+		options.WithCustomProvider[string, string](newMockProvider()),
+	)
+	if err != nil {
+		t.Fatalf("Failed to create cache: %v", err)
+	}
+
+	_ = cache.Set(ctx, "k", "hello", "v")
+
+	if err := cache.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+
+	if err := cache.Set(ctx, "k2", "hi", "v2"); err == nil {
+		t.Error("Set after Close should return error")
+	}
+	if _, _, err := cache.Get(ctx, "k"); err == nil {
+		t.Error("Get after Close should return error")
+	}
+	if err := cache.Delete(ctx, "k"); err == nil {
+		t.Error("Delete after Close should return error")
+	}
+	if _, err := cache.Len(ctx); err == nil {
+		t.Error("Len after Close should return error")
+	}
+	if _, err := cache.Lookup(ctx, "hello", 0.5); err == nil {
+		t.Error("Lookup after Close should return error")
+	}
+	if _, err := cache.TopMatches(ctx, "hello", 3); err == nil {
+		t.Error("TopMatches after Close should return error")
+	}
+	if err := cache.Flush(ctx); err == nil {
+		t.Error("Flush after Close should return error")
+	}
+
+	// Double close should return error
+	if err := cache.Close(); err == nil {
+		t.Error("Double Close should return error")
+	}
+}
+
 func TestWithDifferentTypes(t *testing.T) {
 	t.Run("IntKey", func(t *testing.T) {
 		cache, err := New(

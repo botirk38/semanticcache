@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"sync/atomic"
 
 	"github.com/botirk38/semanticcache/chunker"
 	"github.com/botirk38/semanticcache/options"
@@ -19,7 +20,10 @@ type SemanticCache[K comparable, V any] struct {
 	comparator     similarity.SimilarityFunc
 	chunker        chunker.Chunker
 	enableChunking bool
+	closed         atomic.Bool
 }
+
+var errCacheClosed = errors.New("semanticcache: cache is closed")
 
 // Match represents a semantic search result with its similarity score.
 type Match[V any] struct {
@@ -108,6 +112,9 @@ func NewSemanticCache[K comparable, V any](backend types.CacheBackend[K, V], pro
 // If chunking is enabled and text exceeds token limits, it will be automatically chunked
 // and stored as separate entries with derived keys (key:chunk:0, key:chunk:1, etc.).
 func (sc *SemanticCache[K, V]) Set(ctx context.Context, key K, inputText string, value V) error {
+	if sc.closed.Load() {
+		return errCacheClosed
+	}
 	if key == *new(K) { // Zero value check for K
 		return errors.New("key cannot be zero value")
 	}
@@ -202,6 +209,10 @@ func (sc *SemanticCache[K, V]) aggregateEmbeddings(embeddings [][]float64) []flo
 
 // Get retrieves the value for key, if present.
 func (sc *SemanticCache[K, V]) Get(ctx context.Context, key K) (V, bool, error) {
+	if sc.closed.Load() {
+		var zero V
+		return zero, false, errCacheClosed
+	}
 	entry, found, err := sc.backend.Get(ctx, key)
 	if err != nil {
 		var zero V
@@ -216,26 +227,41 @@ func (sc *SemanticCache[K, V]) Get(ctx context.Context, key K) (V, bool, error) 
 
 // Contains checks for key presence without affecting recency.
 func (sc *SemanticCache[K, V]) Contains(ctx context.Context, key K) (bool, error) {
+	if sc.closed.Load() {
+		return false, errCacheClosed
+	}
 	return sc.backend.Contains(ctx, key)
 }
 
 // Delete removes the entry for key.
 func (sc *SemanticCache[K, V]) Delete(ctx context.Context, key K) error {
+	if sc.closed.Load() {
+		return errCacheClosed
+	}
 	return sc.backend.Delete(ctx, key)
 }
 
 // Flush clears all entries from the cache and the index.
 func (sc *SemanticCache[K, V]) Flush(ctx context.Context) error {
+	if sc.closed.Load() {
+		return errCacheClosed
+	}
 	return sc.backend.Flush(ctx)
 }
 
 // Len returns the number of items in the cache.
 func (sc *SemanticCache[K, V]) Len(ctx context.Context) (int, error) {
+	if sc.closed.Load() {
+		return 0, errCacheClosed
+	}
 	return sc.backend.Len(ctx)
 }
 
 // Lookup returns the first value whose embedding similarity >= threshold.
 func (sc *SemanticCache[K, V]) Lookup(ctx context.Context, inputText string, threshold float64) (*Match[V], error) {
+	if sc.closed.Load() {
+		return nil, errCacheClosed
+	}
 	embedding, err := sc.provider.EmbedText(inputText)
 	if err != nil {
 		return nil, err
@@ -270,6 +296,9 @@ func (sc *SemanticCache[K, V]) Lookup(ctx context.Context, inputText string, thr
 
 // TopMatches returns up to n matches sorted by descending similarity.
 func (sc *SemanticCache[K, V]) TopMatches(ctx context.Context, inputText string, n int) ([]Match[V], error) {
+	if sc.closed.Load() {
+		return nil, errCacheClosed
+	}
 	if n <= 0 {
 		return nil, errors.New("n must be positive")
 	}
@@ -348,10 +377,18 @@ func (sc *SemanticCache[K, V]) DeleteBatch(ctx context.Context, keys []K) error 
 	return nil
 }
 
-// Close closes the underlying backend and provider.
+// Close closes the underlying backend, provider, and marks the cache as closed.
+// Subsequent operations on a closed cache return an error.
 func (sc *SemanticCache[K, V]) Close() error {
+	if !sc.closed.CompareAndSwap(false, true) {
+		return errCacheClosed
+	}
+	var firstErr error
+	if err := sc.backend.Close(); err != nil {
+		firstErr = err
+	}
 	sc.provider.Close()
-	return nil
+	return firstErr
 }
 
 // SetAsync stores or updates the entry asynchronously using backend async capabilities.
