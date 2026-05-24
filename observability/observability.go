@@ -38,7 +38,7 @@ func (NopLogger) Error(string, ...any) {}
 // NopMetrics is a no-op metrics implementation.
 type NopMetrics struct{}
 
-func (NopMetrics) CacheHit()                        {}
-func (NopMetrics) CacheMiss()                       {}
-func (NopMetrics) EmbedLatency(time.Duration)       {}
+func (NopMetrics) CacheHit()                            {}
+func (NopMetrics) CacheMiss()                           {}
+func (NopMetrics) EmbedLatency(time.Duration)           {}
 func (NopMetrics) BackendLatency(string, time.Duration) {}
