@@ -6,6 +6,7 @@ import (
 
 	"github.com/botirk38/semanticcache/backends"
 	"github.com/botirk38/semanticcache/chunker"
+	"github.com/botirk38/semanticcache/providers/ollama"
 	"github.com/botirk38/semanticcache/providers/openai"
 	"github.com/botirk38/semanticcache/similarity"
 	"github.com/botirk38/semanticcache/types"
@@ -136,6 +137,14 @@ func WithOpenAIProvider[K comparable, V any](apiKey string, model ...string) Opt
 			return err
 		}
 		cfg.Provider = provider
+		return nil
+	}
+}
+
+// WithOllamaProvider sets up a local Ollama embedding provider. No API key needed.
+func WithOllamaProvider[K comparable, V any](opts ...ollama.Option) Option[K, V] {
+	return func(cfg *Config[K, V]) error {
+		cfg.Provider = ollama.New(opts...)
 		return nil
 	}
 }
