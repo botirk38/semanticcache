@@ -58,7 +58,7 @@ func NewOpenAIProvider(config OpenAIConfig) (*OpenAIProvider, error) {
 // EmbedText computes the embedding vector for a single piece of text.
 func (p *OpenAIProvider) EmbedText(ctx context.Context, text string) ([]float64, error) {
 	resp, err := p.client.Embeddings.New(ctx, openai.EmbeddingNewParams{
-		Model: openai.EmbeddingModel(p.model),
+		Model: p.model,
 		Input: openai.EmbeddingNewParamsInputUnion{
 			OfArrayOfStrings: []string{text},
 		},
@@ -82,7 +82,7 @@ func (p *OpenAIProvider) EmbedBatch(ctx context.Context, texts []string) ([][]fl
 	}
 
 	resp, err := p.client.Embeddings.New(ctx, openai.EmbeddingNewParams{
-		Model: openai.EmbeddingModel(p.model),
+		Model: p.model,
 		Input: openai.EmbeddingNewParamsInputUnion{
 			OfArrayOfStrings: texts,
 		},
