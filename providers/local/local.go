@@ -44,7 +44,7 @@ func New(opts ...Option) *Provider {
 // EmbedText produces a deterministic embedding from the text hash.
 func (p *Provider) EmbedText(text string) ([]float64, error) {
 	h := fnv.New64a()
-	h.Write([]byte(text))
+	_, _ = h.Write([]byte(text))
 	seed := h.Sum64()
 
 	emb := make([]float64, p.dimensions)
