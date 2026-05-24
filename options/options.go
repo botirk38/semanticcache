@@ -6,6 +6,7 @@ import (
 
 	"github.com/botirk38/semanticcache/backends"
 	"github.com/botirk38/semanticcache/chunker"
+	"github.com/botirk38/semanticcache/providers/cohere"
 	"github.com/botirk38/semanticcache/providers/openai"
 	"github.com/botirk38/semanticcache/similarity"
 	"github.com/botirk38/semanticcache/types"
@@ -136,6 +137,19 @@ func WithOpenAIProvider[K comparable, V any](apiKey string, model ...string) Opt
 			return err
 		}
 		cfg.Provider = provider
+		return nil
+	}
+}
+
+// WithCohereProvider sets up a Cohere embedding provider.
+// The API key is read from the parameter or COHERE_API_KEY env var.
+func WithCohereProvider[K comparable, V any](apiKey string, opts ...cohere.Option) Option[K, V] {
+	return func(cfg *Config[K, V]) error {
+		p, err := cohere.New(apiKey, opts...)
+		if err != nil {
+			return err
+		}
+		cfg.Provider = p
 		return nil
 	}
 }
