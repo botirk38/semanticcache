@@ -22,7 +22,7 @@ type hashProvider struct {
 
 func (p *hashProvider) EmbedText(text string) ([]float64, error) {
 	h := fnv.New64a()
-	h.Write([]byte(text))
+	_, _ = h.Write([]byte(text))
 	seed := h.Sum64()
 	emb := make([]float64, p.dim)
 	for i := range emb {
