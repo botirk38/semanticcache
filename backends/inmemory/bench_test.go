@@ -37,7 +37,7 @@ func BenchmarkLRU_Get(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		backend.Get(ctx, fmt.Sprintf("k%d", i%10000))
+		_, _, _ = backend.Get(ctx, fmt.Sprintf("k%d", i%10000))
 	}
 }
 
@@ -50,7 +50,7 @@ func BenchmarkLRU_GetEmbedding(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		backend.GetEmbedding(ctx, fmt.Sprintf("k%d", i%10000))
+		_, _, _ = backend.GetEmbedding(ctx, fmt.Sprintf("k%d", i%10000))
 	}
 }
 
@@ -75,7 +75,7 @@ func BenchmarkLFU_Get(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		backend.Get(ctx, fmt.Sprintf("k%d", i%10000))
+		_, _, _ = backend.Get(ctx, fmt.Sprintf("k%d", i%10000))
 	}
 }
 
@@ -100,6 +100,6 @@ func BenchmarkFIFO_Get(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		backend.Get(ctx, fmt.Sprintf("k%d", i%10000))
+		_, _, _ = backend.Get(ctx, fmt.Sprintf("k%d", i%10000))
 	}
 }

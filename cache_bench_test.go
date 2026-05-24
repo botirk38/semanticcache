@@ -64,7 +64,7 @@ func BenchmarkCache_Get(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		cache.Get(ctx, fmt.Sprintf("k%d", i%10000))
+		_, _, _ = cache.Get(ctx, fmt.Sprintf("k%d", i%10000))
 	}
 }
 
@@ -78,7 +78,7 @@ func BenchmarkCache_Lookup(b *testing.B) {
 			}
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				cache.Lookup(ctx, "some query", 0.5)
+				_, _ = cache.Lookup(ctx, "some query", 0.5)
 			}
 		})
 	}
@@ -92,7 +92,7 @@ func BenchmarkCache_TopMatches(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		cache.TopMatches(ctx, "some query", 10)
+		_, _ = cache.TopMatches(ctx, "some query", 10)
 	}
 }
 
@@ -105,7 +105,7 @@ func BenchmarkSimilarity_Lookup_Parallel(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			cache.Lookup(ctx, "parallel query", 0.5)
+			_, _ = cache.Lookup(ctx, "parallel query", 0.5)
 		}
 	})
 }
