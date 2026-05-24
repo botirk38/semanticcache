@@ -24,9 +24,9 @@ import (
     "fmt"
     "log"
     
-    "github.com/botirkhaltaev/semanticcache"
-    "github.com/botirkhaltaev/semanticcache/options"
-    "github.com/botirkhaltaev/semanticcache/similarity"
+    "github.com/botirk38/semanticcache"
+    "github.com/botirk38/semanticcache/options"
+    "github.com/botirk38/semanticcache/similarity"
 )
 
 func main() {
@@ -111,9 +111,9 @@ options.WithSimilarityComparator(similarity.ManhattanSimilarity)
 options.WithSimilarityComparator(similarity.PearsonCorrelationSimilarity)
 
 // Custom similarity function
-options.WithSimilarityComparator(func(a, b []float32) float32 {
+options.WithSimilarityComparator(func(a, b []float64) float64 {
     // Your custom similarity logic
-    return similarity
+    return score
 })
 ```
 
@@ -229,9 +229,13 @@ for _, ch := range []<-chan error{errCh1, errCh2, errCh3} {
 ```go
 type MyProvider struct{}
 
-func (p *MyProvider) EmbedText(text string) ([]float32, error) {
+func (p *MyProvider) EmbedText(text string) ([]float64, error) {
     // Your embedding logic
     return embedding, nil
+}
+
+func (p *MyProvider) GetMaxTokens() int {
+    return 8191
 }
 
 func (p *MyProvider) Close() {}
