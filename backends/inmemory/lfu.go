@@ -12,7 +12,7 @@ type lfuEntry[V any] struct {
 	frequency int
 }
 
-// LFUBackend implements Backend and EmbeddingStore using LFU eviction.
+// LFUBackend implements Backend using LFU eviction.
 type LFUBackend[K comparable, V any] struct {
 	mu       sync.RWMutex
 	entries  map[K]*lfuEntry[V]

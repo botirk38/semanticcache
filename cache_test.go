@@ -40,7 +40,7 @@ func (m *mockProvider) EmbedText(_ context.Context, text string) ([]float64, err
 
 func (m *mockProvider) Close() error { return nil }
 
-// ---------- mock backend (implements Backend + EmbeddingStore) ----------
+// ---------- mock backend ----------
 
 type mockBackend[K comparable, V any] struct {
 	data      map[K]types.Entry[V]

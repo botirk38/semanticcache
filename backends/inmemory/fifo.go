@@ -7,7 +7,7 @@ import (
 	"github.com/botirk38/semanticcache/types"
 )
 
-// FIFOBackend implements Backend and EmbeddingStore using FIFO eviction.
+// FIFOBackend implements Backend using FIFO eviction.
 type FIFOBackend[K comparable, V any] struct {
 	mu       sync.RWMutex
 	entries  map[K]types.Entry[V]

@@ -3,16 +3,12 @@ package remote
 import (
 	"context"
 	"crypto/tls"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"math"
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/botirk38/semanticcache/types"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -20,13 +16,11 @@ import (
 type RedisOption func(*redisConfig)
 
 type redisConfig struct {
-	username   string
-	password   string
-	db         int
-	prefix     string
-	indexName  string
-	dimensions int
-	tlsConfig  *tls.Config
+	username  string
+	password  string
+	db        int
+	prefix    string
+	tlsConfig *tls.Config
 }
 
 // WithUsername sets the Redis username.
@@ -49,34 +43,21 @@ func WithPrefix(prefix string) RedisOption {
 	return func(c *redisConfig) { c.prefix = prefix }
 }
 
-// WithIndexName sets the Redis search index name.
-func WithIndexName(name string) RedisOption {
-	return func(c *redisConfig) { c.indexName = name }
-}
-
-// WithDimensions sets the embedding vector dimensions.
-func WithDimensions(dim int) RedisOption {
-	return func(c *redisConfig) { c.dimensions = dim }
-}
-
 // WithTLS sets the TLS configuration for the Redis connection.
 func WithTLS(cfg *tls.Config) RedisOption {
 	return func(c *redisConfig) { c.tlsConfig = cfg }
 }
 
-// RedisBackend implements Backend and VectorSearcher using Redis.
+// RedisBackend implements Backend using Redis with JSON storage.
 type RedisBackend[K comparable, V any] struct {
-	client     *redis.Client
-	prefix     string
-	indexName  string
-	dimensions int
+	client *redis.Client
+	prefix string
 }
 
 type redisDocument[V any] struct {
 	Key       string    `json:"key"`
 	Value     V         `json:"value"`
 	Embedding []float64 `json:"embedding"`
-	Timestamp int64     `json:"timestamp"`
 }
 
 func parseRedisURL(connectionString string) (*redis.Options, error) {
@@ -114,14 +95,10 @@ func parseRedisURL(connectionString string) (*redis.Options, error) {
 // redis:// / rediss:// URL.
 func NewRedisBackend[K comparable, V any](addr string, opts ...RedisOption) (*RedisBackend[K, V], error) {
 	cfg := &redisConfig{
-		prefix:     "semanticcache:",
-		dimensions: 1536,
+		prefix: "semanticcache:",
 	}
 	for _, o := range opts {
 		o(cfg)
-	}
-	if cfg.indexName == "" {
-		cfg.indexName = cfg.prefix + "idx"
 	}
 
 	redisOpts, err := parseRedisURL(addr)
@@ -148,50 +125,14 @@ func NewRedisBackend[K comparable, V any](addr string, opts ...RedisOption) (*Re
 		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
 	}
 
-	b := &RedisBackend[K, V]{
-		client:     client,
-		prefix:     cfg.prefix,
-		indexName:  cfg.indexName,
-		dimensions: cfg.dimensions,
-	}
-	b.initializeIndex()
-	return b, nil
-}
-
-func (b *RedisBackend[K, V]) initializeIndex() {
-	ctx := context.Background()
-
-	// Drop existing index (ignore errors).
-	b.client.FTDropIndex(ctx, b.indexName)
-
-	_, _ = b.client.FTCreate(ctx, b.indexName, &redis.FTCreateOptions{
-		OnJSON: true,
-		Prefix: []any{b.prefix},
-	},
-		&redis.FieldSchema{FieldName: "$.key", As: "key", FieldType: redis.SearchFieldTypeText},
-		&redis.FieldSchema{FieldName: "$.timestamp", As: "timestamp", FieldType: redis.SearchFieldTypeNumeric},
-		&redis.FieldSchema{
-			FieldName: "$.embedding", As: "embedding",
-			FieldType: redis.SearchFieldTypeVector,
-			VectorArgs: &redis.FTVectorArgs{
-				HNSWOptions: &redis.FTHNSWOptions{
-					Type: "FLOAT64", Dim: b.dimensions, DistanceMetric: "COSINE",
-				},
-			},
-		},
-	).Result()
+	return &RedisBackend[K, V]{
+		client: client,
+		prefix: cfg.prefix,
+	}, nil
 }
 
 func (b *RedisBackend[K, V]) keyString(key K) string {
 	return fmt.Sprintf("%s%v", b.prefix, key)
-}
-
-func floatsToBytes(fs []float64) []byte {
-	buf := make([]byte, len(fs)*8)
-	for i, f := range fs {
-		binary.LittleEndian.PutUint64(buf[i*8:(i+1)*8], math.Float64bits(f))
-	}
-	return buf
 }
 
 // Set stores a value with its embedding in Redis.
@@ -200,7 +141,6 @@ func (b *RedisBackend[K, V]) Set(ctx context.Context, key K, embedding []float64
 		Key:       fmt.Sprintf("%v", key),
 		Value:     value,
 		Embedding: embedding,
-		Timestamp: time.Now().Unix(),
 	}
 	_, err := b.client.JSONSet(ctx, b.keyString(key), "$", doc).Result()
 	if err != nil {
@@ -250,45 +190,6 @@ func (b *RedisBackend[K, V]) Contains(ctx context.Context, key K) (bool, error) 
 	return n > 0, nil
 }
 
-// Flush removes all entries with the configured prefix.
-func (b *RedisBackend[K, V]) Flush(ctx context.Context) error {
-	var cursor uint64
-	for {
-		result, next, err := b.client.Scan(ctx, cursor, b.prefix+"*", 100).Result()
-		if err != nil {
-			return fmt.Errorf("failed to scan keys from Redis: %w", err)
-		}
-		if len(result) > 0 {
-			if err := b.client.Del(ctx, result...).Err(); err != nil {
-				return fmt.Errorf("failed to flush Redis: %w", err)
-			}
-		}
-		cursor = next
-		if cursor == 0 {
-			break
-		}
-	}
-	return nil
-}
-
-// Len returns the number of entries with the configured prefix.
-func (b *RedisBackend[K, V]) Len(ctx context.Context) (int, error) {
-	var count int
-	var cursor uint64
-	for {
-		result, next, err := b.client.Scan(ctx, cursor, b.prefix+"*", 100).Result()
-		if err != nil {
-			return 0, fmt.Errorf("failed to count keys in Redis: %w", err)
-		}
-		count += len(result)
-		cursor = next
-		if cursor == 0 {
-			break
-		}
-	}
-	return count, nil
-}
-
 // Keys returns all keys stored under the configured prefix.
 func (b *RedisBackend[K, V]) Keys(ctx context.Context) ([]K, error) {
 	var keys []K
@@ -332,62 +233,46 @@ func (b *RedisBackend[K, V]) GetEmbedding(ctx context.Context, key K) ([]float64
 	return docs[0].Embedding, true, nil
 }
 
+// Flush removes all entries with the configured prefix.
+func (b *RedisBackend[K, V]) Flush(ctx context.Context) error {
+	var cursor uint64
+	for {
+		result, next, err := b.client.Scan(ctx, cursor, b.prefix+"*", 100).Result()
+		if err != nil {
+			return fmt.Errorf("failed to scan keys from Redis: %w", err)
+		}
+		if len(result) > 0 {
+			if err := b.client.Del(ctx, result...).Err(); err != nil {
+				return fmt.Errorf("failed to flush Redis: %w", err)
+			}
+		}
+		cursor = next
+		if cursor == 0 {
+			break
+		}
+	}
+	return nil
+}
+
+// Len returns the number of entries with the configured prefix.
+func (b *RedisBackend[K, V]) Len(ctx context.Context) (int, error) {
+	var count int
+	var cursor uint64
+	for {
+		result, next, err := b.client.Scan(ctx, cursor, b.prefix+"*", 100).Result()
+		if err != nil {
+			return 0, fmt.Errorf("failed to count keys in Redis: %w", err)
+		}
+		count += len(result)
+		cursor = next
+		if cursor == 0 {
+			break
+		}
+	}
+	return count, nil
+}
+
 // Close closes the Redis connection.
 func (b *RedisBackend[K, V]) Close() error {
 	return b.client.Close()
-}
-
-// VectorSearch performs a server-side similarity search using Redis FT.SEARCH.
-func (b *RedisBackend[K, V]) VectorSearch(ctx context.Context, queryEmbedding []float64, threshold float64, limit int) ([]types.VectorSearchResult[K, V], error) {
-	embeddingBytes := floatsToBytes(queryEmbedding)
-
-	query := fmt.Sprintf("*=>[KNN %d @embedding $vec AS vector_distance]", limit)
-	results, err := b.client.FTSearchWithArgs(ctx, b.indexName, query, &redis.FTSearchOptions{
-		Return: []redis.FTSearchReturn{
-			{FieldName: "vector_distance"},
-			{FieldName: "key"},
-		},
-		DialectVersion: 2,
-		Params:         map[string]any{"vec": embeddingBytes},
-	}).Result()
-	if err != nil {
-		return nil, fmt.Errorf("vector search error: %w", err)
-	}
-
-	var hits []types.VectorSearchResult[K, V]
-	for _, doc := range results.Docs {
-		distStr, ok := doc.Fields["vector_distance"]
-		if !ok {
-			continue
-		}
-		distance, err := strconv.ParseFloat(distStr, 64)
-		if err != nil {
-			continue
-		}
-		score := 1.0 - distance
-		if score < threshold {
-			continue
-		}
-
-		keyStr, ok := doc.Fields["key"]
-		if !ok {
-			continue
-		}
-		var key K
-		if err := json.Unmarshal(fmt.Appendf(nil, "\"%s\"", keyStr), &key); err != nil {
-			continue
-		}
-
-		value, found, err := b.Get(ctx, key)
-		if err != nil || !found {
-			continue
-		}
-
-		hits = append(hits, types.VectorSearchResult[K, V]{
-			Key:   key,
-			Value: value,
-			Score: score,
-		})
-	}
-	return hits, nil
 }

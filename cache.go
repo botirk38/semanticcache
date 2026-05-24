@@ -12,7 +12,8 @@ import (
 	"github.com/botirk38/semanticcache/types"
 )
 
-// Cache is a synchronous semantic cache.
+// Cache is a synchronous semantic cache that stores values alongside
+// their embedding vectors and supports similarity-based retrieval.
 type Cache[K comparable, V any] struct {
 	backend    types.Backend[K, V]
 	provider   types.EmbeddingProvider
@@ -20,20 +21,20 @@ type Cache[K comparable, V any] struct {
 	closed     atomic.Bool
 }
 
-// Match represents a semantic search result with its similarity score.
+// Match is a single semantic search result.
 type Match[V any] struct {
 	Value V       `json:"value"`
 	Score float64 `json:"score"`
 }
 
-// BatchItem represents an item to be stored via SetBatch.
+// BatchItem is an input for SetBatch.
 type BatchItem[K comparable, V any] struct {
 	Key       K
 	InputText string
 	Value     V
 }
 
-// New creates a Cache with functional options.
+// New creates a Cache using functional options.
 func New[K comparable, V any](opts ...options.Option[K, V]) (*Cache[K, V], error) {
 	cfg := options.NewConfig[K, V]()
 	if err := cfg.Apply(opts...); err != nil {
@@ -78,7 +79,7 @@ func (c *Cache[K, V]) checkClosed() error {
 	return nil
 }
 
-// Set stores a value keyed by key, computing the embedding from inputText.
+// Set stores a value, computing the embedding from inputText.
 func (c *Cache[K, V]) Set(ctx context.Context, key K, inputText string, value V) error {
 	if err := c.checkClosed(); err != nil {
 		return err
@@ -102,7 +103,7 @@ func (c *Cache[K, V]) Get(ctx context.Context, key K) (V, bool, error) {
 	return c.backend.Get(ctx, key)
 }
 
-// Contains checks for key presence.
+// Contains reports whether key exists.
 func (c *Cache[K, V]) Contains(ctx context.Context, key K) (bool, error) {
 	if err := c.checkClosed(); err != nil {
 		return false, err
@@ -118,7 +119,7 @@ func (c *Cache[K, V]) Delete(ctx context.Context, key K) error {
 	return c.backend.Delete(ctx, key)
 }
 
-// Flush clears all entries.
+// Flush removes all entries.
 func (c *Cache[K, V]) Flush(ctx context.Context) error {
 	if err := c.checkClosed(); err != nil {
 		return err
@@ -134,34 +135,17 @@ func (c *Cache[K, V]) Len(ctx context.Context) (int, error) {
 	return c.backend.Len(ctx)
 }
 
-// Lookup returns the best match whose similarity >= threshold, or nil.
-// If the backend implements VectorSearcher, server-side search is used;
-// otherwise all keys are scanned client-side.
+// Lookup finds the single best match whose similarity >= threshold.
+// Returns nil when nothing meets the threshold.
 func (c *Cache[K, V]) Lookup(ctx context.Context, inputText string, threshold float64) (*Match[V], error) {
 	if err := c.checkClosed(); err != nil {
 		return nil, err
 	}
-
-	embedding, err := c.provider.EmbedText(ctx, inputText)
+	query, err := c.provider.EmbedText(ctx, inputText)
 	if err != nil {
 		return nil, err
 	}
 
-	if vs, ok := c.backend.(types.VectorSearcher[K, V]); ok {
-		results, err := vs.VectorSearch(ctx, embedding, threshold, 1)
-		if err != nil {
-			return nil, err
-		}
-		if len(results) == 0 {
-			return nil, nil
-		}
-		return &Match[V]{Value: results[0].Value, Score: results[0].Score}, nil
-	}
-
-	return c.lookupScan(ctx, embedding, threshold)
-}
-
-func (c *Cache[K, V]) lookupScan(ctx context.Context, query []float64, threshold float64) (*Match[V], error) {
 	keys, err := c.backend.Keys(ctx)
 	if err != nil {
 		return nil, err
@@ -171,15 +155,15 @@ func (c *Cache[K, V]) lookupScan(ctx context.Context, query []float64, threshold
 	bestScore := threshold
 
 	for _, key := range keys {
-		emb, found, err := c.backend.GetEmbedding(ctx, key)
-		if err != nil || !found {
+		emb, ok, err := c.backend.GetEmbedding(ctx, key)
+		if err != nil || !ok {
 			continue
 		}
 		score := c.comparator(query, emb)
 		if score >= bestScore {
-			value, found, err := c.backend.Get(ctx, key)
+			val, found, err := c.backend.Get(ctx, key)
 			if err == nil && found {
-				best = &Match[V]{Value: value, Score: score}
+				best = &Match[V]{Value: val, Score: score}
 				bestScore = score
 			}
 		}
@@ -187,9 +171,7 @@ func (c *Cache[K, V]) lookupScan(ctx context.Context, query []float64, threshold
 	return best, nil
 }
 
-// TopMatches returns up to n matches sorted by descending similarity.
-// If the backend implements VectorSearcher, server-side search is used;
-// otherwise all keys are scanned client-side.
+// TopMatches returns up to n entries sorted by descending similarity.
 func (c *Cache[K, V]) TopMatches(ctx context.Context, inputText string, n int) ([]Match[V], error) {
 	if err := c.checkClosed(); err != nil {
 		return nil, err
@@ -197,28 +179,11 @@ func (c *Cache[K, V]) TopMatches(ctx context.Context, inputText string, n int) (
 	if n <= 0 {
 		return nil, scerrors.ErrInvalidN
 	}
-
-	embedding, err := c.provider.EmbedText(ctx, inputText)
+	query, err := c.provider.EmbedText(ctx, inputText)
 	if err != nil {
 		return nil, err
 	}
 
-	if vs, ok := c.backend.(types.VectorSearcher[K, V]); ok {
-		results, err := vs.VectorSearch(ctx, embedding, 0, n)
-		if err != nil {
-			return nil, err
-		}
-		matches := make([]Match[V], len(results))
-		for i, r := range results {
-			matches[i] = Match[V]{Value: r.Value, Score: r.Score}
-		}
-		return matches, nil
-	}
-
-	return c.topMatchesScan(ctx, embedding, n)
-}
-
-func (c *Cache[K, V]) topMatchesScan(ctx context.Context, query []float64, n int) ([]Match[V], error) {
 	keys, err := c.backend.Keys(ctx)
 	if err != nil {
 		return nil, err
@@ -226,14 +191,14 @@ func (c *Cache[K, V]) topMatchesScan(ctx context.Context, query []float64, n int
 
 	matches := make([]Match[V], 0, len(keys))
 	for _, key := range keys {
-		emb, found, err := c.backend.GetEmbedding(ctx, key)
-		if err != nil || !found {
+		emb, ok, err := c.backend.GetEmbedding(ctx, key)
+		if err != nil || !ok {
 			continue
 		}
 		score := c.comparator(query, emb)
-		value, found, err := c.backend.Get(ctx, key)
+		val, found, err := c.backend.Get(ctx, key)
 		if err == nil && found {
-			matches = append(matches, Match[V]{Value: value, Score: score})
+			matches = append(matches, Match[V]{Value: val, Score: score})
 		}
 	}
 
@@ -241,20 +206,17 @@ func (c *Cache[K, V]) topMatchesScan(ctx context.Context, query []float64, n int
 		return matches[i].Score > matches[j].Score
 	})
 	if len(matches) > n {
-		return matches[:n], nil
+		matches = matches[:n]
 	}
 	return matches, nil
 }
 
-// SetBatch stores multiple entries.
+// SetBatch stores multiple items.
 func (c *Cache[K, V]) SetBatch(ctx context.Context, items []BatchItem[K, V]) error {
 	if err := c.checkClosed(); err != nil {
 		return err
 	}
 	for _, item := range items {
-		if item.Key == *new(K) {
-			return scerrors.ErrZeroKey
-		}
 		if err := c.Set(ctx, item.Key, item.InputText, item.Value); err != nil {
 			return err
 		}
@@ -262,17 +224,19 @@ func (c *Cache[K, V]) SetBatch(ctx context.Context, items []BatchItem[K, V]) err
 	return nil
 }
 
-// GetBatch retrieves multiple values by key.
+// GetBatch retrieves multiple values. Missing keys are omitted.
 func (c *Cache[K, V]) GetBatch(ctx context.Context, keys []K) (map[K]V, error) {
 	if err := c.checkClosed(); err != nil {
 		return nil, err
 	}
-	result := make(map[K]V)
+	result := make(map[K]V, len(keys))
 	for _, key := range keys {
-		if value, found, err := c.backend.Get(ctx, key); err != nil {
+		val, found, err := c.backend.Get(ctx, key)
+		if err != nil {
 			return nil, err
-		} else if found {
-			result[key] = value
+		}
+		if found {
+			result[key] = val
 		}
 	}
 	return result, nil
@@ -291,15 +255,15 @@ func (c *Cache[K, V]) DeleteBatch(ctx context.Context, keys []K) error {
 	return nil
 }
 
-// Close closes both the backend and the provider.
+// Close releases both the provider and backend.
 func (c *Cache[K, V]) Close() error {
 	if c.closed.Swap(true) {
 		return nil
 	}
-	provErr := c.provider.Close()
-	backendErr := c.backend.Close()
-	if provErr != nil {
-		return fmt.Errorf("provider close: %w", provErr)
+	pErr := c.provider.Close()
+	bErr := c.backend.Close()
+	if pErr != nil {
+		return fmt.Errorf("provider close: %w", pErr)
 	}
-	return backendErr
+	return bErr
 }

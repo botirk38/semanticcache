@@ -39,23 +39,6 @@ type Backend[K comparable, V any] interface {
 	Close() error
 }
 
-// VectorSearchResult is a single hit returned by a VectorSearcher.
-type VectorSearchResult[K comparable, V any] struct {
-	Key   K
-	Value V
-	Score float64
-}
-
-// VectorSearcher performs server-side similarity search. Backends like
-// Redis that have native vector-search capabilities implement this
-// in addition to Backend. When present, Lookup and TopMatches use it
-// instead of scanning all keys client-side.
-type VectorSearcher[K comparable, V any] interface {
-	// VectorSearch returns up to limit results whose similarity to query
-	// meets or exceeds threshold, sorted by descending score.
-	VectorSearch(ctx context.Context, query []float64, threshold float64, limit int) ([]VectorSearchResult[K, V], error)
-}
-
 // EmbeddingProvider turns text into embedding vectors.
 type EmbeddingProvider interface {
 	// EmbedText computes the embedding vector for a single piece of text.

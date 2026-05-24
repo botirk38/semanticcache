@@ -8,7 +8,7 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 )
 
-// LRUBackend implements Backend and EmbeddingStore using LRU eviction.
+// LRUBackend implements Backend using LRU eviction.
 type LRUBackend[K comparable, V any] struct {
 	mu    sync.RWMutex
 	cache *lru.Cache[K, types.Entry[V]]
