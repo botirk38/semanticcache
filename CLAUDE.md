@@ -1,108 +1,71 @@
-# SemanticCache - Claude Development Instructions
+# SemanticCache -- Development Instructions
 
-## Project Overview
-This is a high-performance semantic caching library for Go that uses vector embeddings to find semantically similar content. The library supports multiple backends (in-memory and Redis) and embedding providers (OpenAI).
+## Overview
+Semantic caching library for Go. Stores values with embedding vectors, retrieves by similarity. Sync-only `Cache[K, V]` type with pluggable backends and embedding providers.
 
-## Project Structure
-The project is organized into modular packages following Go best practices:
-
+## Project structure
 ```
 semanticcache/
-├── similarity/                    # Similarity algorithms package
-│   ├── similarity.go             # SimilarityFunc type definition
-│   ├── cosine.go                 # Individual algorithm implementations
-│   ├── euclidean.go, dotproduct.go, manhattan.go, pearson.go
-│   └── similarity_test.go        # Complete test suite
-├── options/                       # Functional options package  
-│   ├── options.go                # All With* option functions
-│   └── options_test.go           # Options test suite
-├── backends/                      # Storage backends
-│   ├── inmemory/                 # In-memory backends (LRU, LFU, FIFO)
-│   └── remote/                   # Remote backends (Redis)
-├── providers/                     # Embedding providers
-│   └── openai/                   # OpenAI provider implementation
-├── types/                        # Shared types and interfaces
-├── cache.go                      # Main cache implementation
-├── cache_test.go                 # Main cache tests
-└── README.md                     # Updated with new structure
+  cache.go, errors.go          Cache type, constructors, sentinel errors
+  types/                       Backend[K,V] and EmbeddingProvider interfaces
+  options/                     Functional options (With* functions), config errors
+  backends/
+    inmemory/                  LRU, LFU, FIFO (thread-safe)
+    remote/                    Redis (JSON storage)
+  providers/
+    openai/                    OpenAI embeddings (official SDK)
+    local/                     Hash-based provider for testing (no API key)
+  similarity/                  Cosine, Euclidean, DotProduct, Manhattan, Pearson
+  chunker/                     Text chunking utilities
+  tokenizer/                   Token counting (OpenAI, Anthropic, Gemini)
 ```
 
-## Development Guidelines
+## Key design decisions
+- Sync-only. No async cache.
+- `Backend[K, V]` has 9 methods. Every backend implements all of them.
+- No centralized errors package. Each package defines its own errors.
+- Functional options pattern for configuration.
+- `context.Context` on all operations.
+- Generics throughout: `Cache[K comparable, V any]`.
 
-### Package Usage
-- **Main cache**: `semanticcache.New()` - creates new cache instances
-- **Options**: `options.With*()` - all functional options for configuration
-- **Similarity**: `similarity.*Similarity` - similarity algorithm functions
-- **Types**: `types.*` - shared interfaces and types
+## Commands
+```
+go test ./...             # all tests
+go test -race ./...       # with race detector
+go test -bench=. ./...    # benchmarks
+go vet ./...              # static analysis
+gofmt -l .                # formatting check
+go build ./...            # build all
+```
 
-### Testing Commands
-- Run all tests: `go test ./...`
-- Run specific package tests: `go test ./cache_test.go ./cache.go -v`
-- Test coverage: `go test -cover ./...`
-
-### Code Style
-- Follow Go idioms and conventions
-- Use functional options pattern for configuration
-- Maintain backward compatibility when possible
-- Add comprehensive tests for new features
-- Document public APIs with Go comments
-
-### Key Design Patterns
-1. **Functional Options**: All configuration uses the options pattern
-2. **Interface Segregation**: Separate interfaces for backends, providers, similarity functions
-3. **Generic Types**: Full generic support for key/value types
-4. **Context Awareness**: All operations support context.Context
-5. **Modular Architecture**: Clear separation of concerns across packages
-
-### Common Tasks
-
-#### Adding New Similarity Algorithm
-1. Create new file in `similarity/` package
-2. Implement function with signature `func(a, b []float32) float32`
-3. Add tests in `similarity_test.go`
-4. Export function for use in options
-
-#### Adding New Backend
-1. Implement the `Backend` interface in `types/types.go`
-2. Create option function in `options/options.go`
-3. Add comprehensive tests
-4. Update documentation
-
-#### Adding New Provider
-1. Implement the `EmbeddingProvider` interface in `types/types.go`
-2. Create option function in `options/options.go`
-3. Add integration tests
-4. Update documentation
-
-### Testing Strategy
-- Unit tests for individual components
-- Integration tests for end-to-end functionality
-- Benchmark tests for performance-critical paths
-- Mock providers for testing without external dependencies
-
-### Import Guidelines
-When working with the codebase:
+## Import path
 ```go
-import (
-    "github.com/botirkhaltaev/semanticcache"
-    "github.com/botirkhaltaev/semanticcache/options"
-    "github.com/botirkhaltaev/semanticcache/similarity"
-    "github.com/botirkhaltaev/semanticcache/types"
-)
+import "github.com/botirk38/semanticcache"
 ```
 
-### Recent Restructuring
-The project was recently restructured from a monolithic approach to modular packages:
-- Moved similarity functions to `similarity/` package
-- Moved functional options to `options/` package
-- Updated all imports and references throughout the codebase
-- Maintained API compatibility where possible
+All subpackages: `github.com/botirk38/semanticcache/{options,types,backends/inmemory,...}`
 
-### Build and Test
-Ensure all tests pass before making changes:
-```bash
-go test ./...
-go build ./...
-```
+## Adding a new backend
+1. Implement `types.Backend[K, V]` (9 methods)
+2. Add `With*Backend` option in `options/options.go`
+3. Add compile-time check: `var _ types.Backend[string, string] = (*YourBackend[string, string])(nil)`
+4. Add tests in the backend's package
+5. Add a re-export in `backends/backends.go`
 
-The project should build without warnings and all tests should pass.
+## Adding a new provider
+1. Implement `types.EmbeddingProvider` (2 methods: `EmbedText`, `Close`)
+2. Optionally implement `types.BatchEmbeddingProvider`
+3. Add `With*Provider` option in `options/options.go`
+4. Add tests (use `httptest` for HTTP providers)
+5. Add a re-export in `providers/providers.go`
+
+## Adding a similarity function
+1. Create a new file in `similarity/`
+2. Implement `func(a, b []float64) float64`
+3. Add tests in `similarity_test.go`
+
+## Error conventions
+- Each package defines its own sentinel errors.
+- Root package: `ErrClosed`, `ErrZeroKey`, `ErrInvalidN`
+- Options: `ErrNilBackend`, `ErrNilProvider`, `ErrNilComparator`
+- Chunker: `ErrInvalidChunkSize`, `ErrEmptyText`, etc.

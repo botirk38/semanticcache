@@ -2,12 +2,26 @@
 package options
 
 import (
+	"errors"
+
 	"github.com/botirk38/semanticcache/backends/inmemory"
 	"github.com/botirk38/semanticcache/backends/remote"
-	scerrors "github.com/botirk38/semanticcache/errors"
+	"github.com/botirk38/semanticcache/providers/local"
 	"github.com/botirk38/semanticcache/providers/openai"
 	"github.com/botirk38/semanticcache/similarity"
 	"github.com/botirk38/semanticcache/types"
+)
+
+// Sentinel errors for configuration validation.
+var (
+	// ErrNilBackend is returned when a nil backend is provided.
+	ErrNilBackend = errors.New("options: backend cannot be nil")
+
+	// ErrNilProvider is returned when a nil embedding provider is provided.
+	ErrNilProvider = errors.New("options: embedding provider cannot be nil")
+
+	// ErrNilComparator is returned when a nil similarity function is provided.
+	ErrNilComparator = errors.New("options: similarity comparator cannot be nil")
 )
 
 // Option configures a cache instance.
@@ -40,10 +54,10 @@ func (c *Config[K, V]) Apply(opts ...Option[K, V]) error {
 // Validate checks that the config has the required fields.
 func (c *Config[K, V]) Validate() error {
 	if c.Backend == nil {
-		return scerrors.ErrNilBackend
+		return ErrNilBackend
 	}
 	if c.Provider == nil {
-		return scerrors.ErrNilProvider
+		return ErrNilProvider
 	}
 	return nil
 }
@@ -87,7 +101,7 @@ func WithLFUBackend[K comparable, V any](capacity int) Option[K, V] {
 }
 
 // WithRedisBackend sets up a Redis backend. addr can be "host:port" or a
-// redis:// URL. Use remote.With* options for password, prefix, dimensions, etc.
+// redis:// URL. Use remote.With* options for password, prefix, etc.
 func WithRedisBackend[K comparable, V any](addr string, opts ...remote.RedisOption) Option[K, V] {
 	return func(cfg *Config[K, V]) error {
 		b, err := remote.NewRedisBackend[K, V](addr, opts...)
@@ -103,7 +117,7 @@ func WithRedisBackend[K comparable, V any](addr string, opts ...remote.RedisOpti
 func WithCustomBackend[K comparable, V any](backend types.Backend[K, V]) Option[K, V] {
 	return func(cfg *Config[K, V]) error {
 		if backend == nil {
-			return scerrors.ErrNilBackend
+			return ErrNilBackend
 		}
 		cfg.Backend = backend
 		return nil
@@ -128,11 +142,20 @@ func WithOpenAIProvider[K comparable, V any](apiKey string, model ...string) Opt
 	}
 }
 
+// WithLocalProvider sets up a hash-based provider for testing (no API key needed).
+// dimensions controls the vector size (default 128 if <= 0).
+func WithLocalProvider[K comparable, V any](dimensions int) Option[K, V] {
+	return func(cfg *Config[K, V]) error {
+		cfg.Provider = local.New(dimensions)
+		return nil
+	}
+}
+
 // WithCustomProvider uses a pre-constructed embedding provider.
 func WithCustomProvider[K comparable, V any](provider types.EmbeddingProvider) Option[K, V] {
 	return func(cfg *Config[K, V]) error {
 		if provider == nil {
-			return scerrors.ErrNilProvider
+			return ErrNilProvider
 		}
 		cfg.Provider = provider
 		return nil
@@ -145,7 +168,7 @@ func WithCustomProvider[K comparable, V any](provider types.EmbeddingProvider) O
 func WithSimilarityComparator[K comparable, V any](comparator similarity.SimilarityFunc) Option[K, V] {
 	return func(cfg *Config[K, V]) error {
 		if comparator == nil {
-			return scerrors.ErrNilComparator
+			return ErrNilComparator
 		}
 		cfg.Comparator = comparator
 		return nil
