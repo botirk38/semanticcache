@@ -138,12 +138,15 @@ func NewRedisBackend[K comparable, V any](config types.BackendConfig) (*RedisBac
 	return backend, nil
 }
 
-// initializeIndex creates the Redis vector search index if it doesn't exist
+// initializeIndex creates the Redis vector search index if it doesn't already exist.
 func (b *RedisBackend[K, V]) initializeIndex() {
 	ctx := context.Background()
 
-	// Drop existing index if it exists (ignore errors)
-	b.client.FTDropIndex(ctx, b.indexName)
+	// Check if the index already exists before creating it.
+	// This avoids dropping existing data on reconnect.
+	if _, err := b.client.FTInfo(ctx, b.indexName).Result(); err == nil {
+		return // index already exists
+	}
 
 	// Create new index with vector field
 	_, err := b.client.FTCreate(ctx, b.indexName, &redis.FTCreateOptions{

@@ -55,6 +55,13 @@ type CacheBackend[K comparable, V any] interface {
 	GetBatchAsync(ctx context.Context, keys []K) <-chan AsyncBatchResult[K, V]
 }
 
+// VectorSearcher is an optional interface that backends can implement to support
+// server-side vector similarity search (e.g. Redis FT.SEARCH). When a backend
+// implements this, Lookup and TopMatches use it instead of scanning all keys.
+type VectorSearcher[K comparable, V any] interface {
+	VectorSearch(ctx context.Context, queryEmbedding []float64, threshold float64, limit int) ([]K, error)
+}
+
 // AsyncGetResult holds the result of an async Get operation at the backend level.
 type AsyncGetResult[V any] struct {
 	Entry Entry[V]

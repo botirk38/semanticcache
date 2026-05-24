@@ -241,6 +241,25 @@ func (sc *SemanticCache[K, V]) Lookup(ctx context.Context, inputText string, thr
 		return nil, err
 	}
 
+	// Fast path: use server-side vector search if the backend supports it.
+	if vs, ok := sc.backend.(types.VectorSearcher[K, V]); ok {
+		matchedKeys, err := vs.VectorSearch(ctx, embedding, threshold, 1)
+		if err != nil {
+			return nil, err
+		}
+		if len(matchedKeys) == 0 {
+			return nil, nil
+		}
+		entry, found, err := sc.backend.Get(ctx, matchedKeys[0])
+		if err != nil || !found {
+			return nil, err
+		}
+		emb, _, _ := sc.backend.GetEmbedding(ctx, matchedKeys[0])
+		score := sc.comparator(embedding, emb)
+		return &Match[V]{Value: entry.Value, Score: score}, nil
+	}
+
+	// Slow path: scan all keys.
 	keys, err := sc.backend.Keys(ctx)
 	if err != nil {
 		return nil, err
@@ -260,7 +279,7 @@ func (sc *SemanticCache[K, V]) Lookup(ctx context.Context, inputText string, thr
 			entry, found, err := sc.backend.Get(ctx, key)
 			if err == nil && found {
 				bestMatch = &Match[V]{Value: entry.Value, Score: score}
-				bestScore = score // Update threshold to find even better matches
+				bestScore = score
 			}
 		}
 	}
@@ -279,6 +298,29 @@ func (sc *SemanticCache[K, V]) TopMatches(ctx context.Context, inputText string,
 		return nil, err
 	}
 
+	// Fast path: use server-side vector search if the backend supports it.
+	if vs, ok := sc.backend.(types.VectorSearcher[K, V]); ok {
+		matchedKeys, err := vs.VectorSearch(ctx, embedding, 0, n)
+		if err != nil {
+			return nil, err
+		}
+		matches := make([]Match[V], 0, len(matchedKeys))
+		for _, key := range matchedKeys {
+			entry, found, err := sc.backend.Get(ctx, key)
+			if err != nil || !found {
+				continue
+			}
+			emb, _, _ := sc.backend.GetEmbedding(ctx, key)
+			score := sc.comparator(embedding, emb)
+			matches = append(matches, Match[V]{Value: entry.Value, Score: score})
+		}
+		sort.Slice(matches, func(i, j int) bool {
+			return matches[i].Score > matches[j].Score
+		})
+		return matches, nil
+	}
+
+	// Slow path: scan all keys.
 	keys, err := sc.backend.Keys(ctx)
 	if err != nil {
 		return nil, err
