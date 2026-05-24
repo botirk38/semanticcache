@@ -309,14 +309,14 @@ func TestAsyncOperations(t *testing.T) {
 		errCh3 := cache.SetAsync(ctx, "key3", "test", "value3")
 
 		// Wait for all to complete
-		if err := <-errCh1; err != nil {
-			t.Errorf("SetAsync 1 failed: %v", err)
+		if e := <-errCh1; e != nil {
+			t.Errorf("SetAsync 1 failed: %v", e)
 		}
-		if err := <-errCh2; err != nil {
-			t.Errorf("SetAsync 2 failed: %v", err)
+		if e := <-errCh2; e != nil {
+			t.Errorf("SetAsync 2 failed: %v", e)
 		}
-		if err := <-errCh3; err != nil {
-			t.Errorf("SetAsync 3 failed: %v", err)
+		if e := <-errCh3; e != nil {
+			t.Errorf("SetAsync 3 failed: %v", e)
 		}
 
 		// Verify all values

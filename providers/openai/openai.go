@@ -66,7 +66,7 @@ func NewOpenAIProvider(config OpenAIConfig) (*OpenAIProvider, error) {
 // EmbedText sends the embedding request to OpenAI.
 func (p *OpenAIProvider) EmbedText(text string) ([]float64, error) {
 	resp, err := p.client.Embeddings.New(context.Background(), openai.EmbeddingNewParams{
-		Model: openai.EmbeddingModel(p.model),
+		Model: p.model,
 		Input: openai.EmbeddingNewParamsInputUnion{
 			OfArrayOfStrings: []string{text},
 		},
@@ -95,7 +95,7 @@ func (p *OpenAIProvider) EmbedBatch(texts []string) ([][]float64, error) {
 	}
 
 	resp, err := p.client.Embeddings.New(context.Background(), openai.EmbeddingNewParams{
-		Model: openai.EmbeddingModel(p.model),
+		Model: p.model,
 		Input: openai.EmbeddingNewParamsInputUnion{
 			OfArrayOfStrings: texts,
 		},
