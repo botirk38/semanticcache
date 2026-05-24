@@ -26,7 +26,7 @@ func newMockProvider() *mockProvider {
 	}
 }
 
-func (m *mockProvider) EmbedText(text string) ([]float64, error) {
+func (m *mockProvider) EmbedText(_ context.Context, text string) ([]float64, error) {
 	if m.shouldErr {
 		return nil, &testError{"mock embedding error"}
 	}
@@ -37,7 +37,7 @@ func (m *mockProvider) EmbedText(text string) ([]float64, error) {
 	return []float64{0.5, 0.5, 0.5}, nil
 }
 
-func (m *mockProvider) Close() {}
+func (m *mockProvider) Close() error { return nil }
 
 // GetMaxTokens returns a mock token limit for testing
 func (m *mockProvider) GetMaxTokens() int {

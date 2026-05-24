@@ -64,8 +64,8 @@ func NewOpenAIProvider(config OpenAIConfig) (*OpenAIProvider, error) {
 }
 
 // EmbedText sends the embedding request to OpenAI.
-func (p *OpenAIProvider) EmbedText(text string) ([]float64, error) {
-	resp, err := p.client.Embeddings.New(context.Background(), openai.EmbeddingNewParams{
+func (p *OpenAIProvider) EmbedText(ctx context.Context, text string) ([]float64, error) {
+	resp, err := p.client.Embeddings.New(ctx, openai.EmbeddingNewParams{
 		Model: openai.EmbeddingModel(p.model),
 		Input: openai.EmbeddingNewParamsInputUnion{
 			OfArrayOfStrings: []string{text},
@@ -84,7 +84,7 @@ func (p *OpenAIProvider) EmbedText(text string) ([]float64, error) {
 // EmbedBatch sends a batch embedding request to OpenAI.
 // This is more efficient than calling EmbedText multiple times as it
 // makes a single API call for all texts. OpenAI supports up to 2048 texts per request.
-func (p *OpenAIProvider) EmbedBatch(texts []string) ([][]float64, error) {
+func (p *OpenAIProvider) EmbedBatch(ctx context.Context, texts []string) ([][]float64, error) {
 	if len(texts) == 0 {
 		return nil, errors.New("no texts provided for batch embedding")
 	}
@@ -94,7 +94,7 @@ func (p *OpenAIProvider) EmbedBatch(texts []string) ([][]float64, error) {
 		return nil, errors.New("batch size exceeds OpenAI limit of 2048 texts")
 	}
 
-	resp, err := p.client.Embeddings.New(context.Background(), openai.EmbeddingNewParams{
+	resp, err := p.client.Embeddings.New(ctx, openai.EmbeddingNewParams{
 		Model: openai.EmbeddingModel(p.model),
 		Input: openai.EmbeddingNewParamsInputUnion{
 			OfArrayOfStrings: texts,
@@ -117,7 +117,7 @@ func (p *OpenAIProvider) EmbedBatch(texts []string) ([][]float64, error) {
 	return embeddings, nil
 }
 
-func (p *OpenAIProvider) Close() {}
+func (p *OpenAIProvider) Close() error { return nil }
 
 // GetMaxTokens returns the maximum number of tokens this OpenAI model can handle.
 func (p *OpenAIProvider) GetMaxTokens() int {

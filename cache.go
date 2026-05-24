@@ -127,7 +127,7 @@ func (sc *SemanticCache[K, V]) Set(ctx context.Context, key K, inputText string,
 	}
 
 	// No chunking needed - store normally
-	embedding, err := sc.provider.EmbedText(inputText)
+	embedding, err := sc.provider.EmbedText(ctx, inputText)
 	if err != nil {
 		return err
 	}
@@ -147,7 +147,7 @@ func (sc *SemanticCache[K, V]) setWithChunks(ctx context.Context, key K, chunks 
 	var embeddings [][]float64
 	var embErr error
 	if batchProvider, ok := sc.provider.(types.BatchEmbeddingProvider); ok {
-		embeddings, embErr = batchProvider.EmbedBatch(chunkTexts)
+		embeddings, embErr = batchProvider.EmbedBatch(ctx, chunkTexts)
 		if embErr != nil {
 			return fmt.Errorf("failed to batch embed chunks: %w", embErr)
 		}
@@ -155,7 +155,7 @@ func (sc *SemanticCache[K, V]) setWithChunks(ctx context.Context, key K, chunks 
 		// Fallback to individual embeddings
 		embeddings = make([][]float64, len(chunkTexts))
 		for i, text := range chunkTexts {
-			emb, err := sc.provider.EmbedText(text)
+			emb, err := sc.provider.EmbedText(ctx, text)
 			if err != nil {
 				return fmt.Errorf("failed to embed chunk %d: %w", i, err)
 			}
@@ -236,7 +236,7 @@ func (sc *SemanticCache[K, V]) Len(ctx context.Context) (int, error) {
 
 // Lookup returns the first value whose embedding similarity >= threshold.
 func (sc *SemanticCache[K, V]) Lookup(ctx context.Context, inputText string, threshold float64) (*Match[V], error) {
-	embedding, err := sc.provider.EmbedText(inputText)
+	embedding, err := sc.provider.EmbedText(ctx, inputText)
 	if err != nil {
 		return nil, err
 	}
@@ -274,7 +274,7 @@ func (sc *SemanticCache[K, V]) TopMatches(ctx context.Context, inputText string,
 		return nil, errors.New("n must be positive")
 	}
 
-	embedding, err := sc.provider.EmbedText(inputText)
+	embedding, err := sc.provider.EmbedText(ctx, inputText)
 	if err != nil {
 		return nil, err
 	}
@@ -350,8 +350,7 @@ func (sc *SemanticCache[K, V]) DeleteBatch(ctx context.Context, keys []K) error 
 
 // Close closes the underlying backend and provider.
 func (sc *SemanticCache[K, V]) Close() error {
-	sc.provider.Close()
-	return nil
+	return sc.provider.Close()
 }
 
 // SetAsync stores or updates the entry asynchronously using backend async capabilities.
@@ -364,7 +363,7 @@ func (sc *SemanticCache[K, V]) SetAsync(ctx context.Context, key K, inputText st
 			errCh <- errors.New("key cannot be zero value")
 			return
 		}
-		embedding, err := sc.provider.EmbedText(inputText)
+		embedding, err := sc.provider.EmbedText(ctx, inputText)
 		if err != nil {
 			errCh <- err
 			return
@@ -478,7 +477,7 @@ func (sc *SemanticCache[K, V]) SetBatchAsync(ctx context.Context, items []BatchI
 
 		for _, item := range items {
 			go func(it BatchItem[K, V]) {
-				embedding, err := sc.provider.EmbedText(it.InputText)
+				embedding, err := sc.provider.EmbedText(ctx, it.InputText)
 				if err != nil {
 					resultCh <- setResult{err: err}
 					return

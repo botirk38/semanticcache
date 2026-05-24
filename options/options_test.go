@@ -13,7 +13,7 @@ type mockProvider struct {
 	shouldErr bool
 }
 
-func (m *mockProvider) EmbedText(text string) ([]float64, error) {
+func (m *mockProvider) EmbedText(_ context.Context, text string) ([]float64, error) {
 	if m.shouldErr {
 		return nil, &testError{"mock error"}
 	}
@@ -24,7 +24,7 @@ func (m *mockProvider) GetMaxTokens() int {
 	return 8191 // Default OpenAI limit
 }
 
-func (m *mockProvider) Close() {}
+func (m *mockProvider) Close() error { return nil }
 
 type testError struct {
 	msg string

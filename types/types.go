@@ -97,9 +97,9 @@ const (
 // EmbeddingProvider defines the interface all embedding providers must satisfy.
 type EmbeddingProvider interface {
 	// EmbedText turns a piece of text into its embedding vector.
-	EmbedText(text string) ([]float64, error)
+	EmbedText(ctx context.Context, text string) ([]float64, error)
 	// Close frees any resources held by the provider.
-	Close()
+	Close() error
 	// GetMaxTokens returns the maximum number of tokens this provider can handle.
 	GetMaxTokens() int
 }
@@ -111,7 +111,7 @@ type BatchEmbeddingProvider interface {
 	EmbeddingProvider
 	// EmbedBatch embeds multiple texts in a single operation.
 	// This is more efficient than calling EmbedText multiple times.
-	EmbedBatch(texts []string) ([][]float64, error)
+	EmbedBatch(ctx context.Context, texts []string) ([][]float64, error)
 }
 
 // ProviderType represents the type of embedding provider
