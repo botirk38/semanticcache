@@ -51,7 +51,8 @@ func TestBackend_SetGetDelete(t *testing.T) {
 				t.Fatalf("expected v1, got %q (ok=%v)", v, ok)
 			}
 
-			if err := b.Delete(ctx, "k1"); err != nil {
+			err = b.Delete(ctx, "k1")
+			if err != nil {
 				t.Fatalf("Delete: %v", err)
 			}
 
