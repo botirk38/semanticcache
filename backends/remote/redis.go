@@ -3,534 +3,276 @@ package remote
 import (
 	"context"
 	"crypto/tls"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"math"
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/botirk38/semanticcache/types"
 	"github.com/redis/go-redis/v9"
 )
 
-// RedisBackend implements CacheBackend using Redis with vector search
-type RedisBackend[K comparable, V any] struct {
-	client     *redis.Client
-	prefix     string
-	indexName  string
-	dimensions int
+// RedisOption configures a RedisBackend.
+type RedisOption func(*redisConfig)
+
+type redisConfig struct {
+	username  string
+	password  string
+	db        int
+	prefix    string
+	tlsConfig *tls.Config
 }
 
-// redisDocument represents a cached entry stored in Redis
+// WithUsername sets the Redis username.
+func WithUsername(username string) RedisOption {
+	return func(c *redisConfig) { c.username = username }
+}
+
+// WithPassword sets the Redis password.
+func WithPassword(password string) RedisOption {
+	return func(c *redisConfig) { c.password = password }
+}
+
+// WithDB sets the Redis database number.
+func WithDB(db int) RedisOption {
+	return func(c *redisConfig) { c.db = db }
+}
+
+// WithPrefix sets the key prefix for all entries.
+func WithPrefix(prefix string) RedisOption {
+	return func(c *redisConfig) { c.prefix = prefix }
+}
+
+// WithTLS sets the TLS configuration for the Redis connection.
+func WithTLS(cfg *tls.Config) RedisOption {
+	return func(c *redisConfig) { c.tlsConfig = cfg }
+}
+
+// RedisBackend implements Backend using Redis with JSON storage.
+type RedisBackend[K comparable, V any] struct {
+	client *redis.Client
+	prefix string
+}
+
 type redisDocument[V any] struct {
 	Key       string    `json:"key"`
 	Value     V         `json:"value"`
 	Embedding []float64 `json:"embedding"`
-	Timestamp int64     `json:"timestamp"`
 }
 
-// parseRedisURL parses a Redis URL and returns redis.Options
 func parseRedisURL(connectionString string) (*redis.Options, error) {
-	// Handle redis:// or rediss:// URLs
 	if strings.HasPrefix(connectionString, "redis://") || strings.HasPrefix(connectionString, "rediss://") {
 		parsedURL, err := url.Parse(connectionString)
 		if err != nil {
 			return nil, fmt.Errorf("invalid Redis URL: %w", err)
 		}
 
-		opts := &redis.Options{
-			Addr: parsedURL.Host,
-		}
+		opts := &redis.Options{Addr: parsedURL.Host}
 
-		// Handle TLS
 		if parsedURL.Scheme == "rediss" {
-			opts.TLSConfig = &tls.Config{
-				MinVersion: tls.VersionTLS12,
-			}
+			opts.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
 		}
 
-		// Extract username and password
 		if parsedURL.User != nil {
 			opts.Username = parsedURL.User.Username()
-			if password, ok := parsedURL.User.Password(); ok {
-				opts.Password = password
+			if pw, ok := parsedURL.User.Password(); ok {
+				opts.Password = pw
 			}
 		}
 
-		// Extract database number from path
 		if parsedURL.Path != "" && parsedURL.Path != "/" {
 			dbStr := strings.TrimPrefix(parsedURL.Path, "/")
 			if db, err := strconv.Atoi(dbStr); err == nil {
 				opts.DB = db
 			}
 		}
-
 		return opts, nil
 	}
-
-	// For simple address format (host:port), return minimal options
-	return &redis.Options{
-		Addr: connectionString,
-	}, nil
+	return &redis.Options{Addr: connectionString}, nil
 }
 
-// NewRedisBackend creates a new Redis backend
-func NewRedisBackend[K comparable, V any](config types.BackendConfig) (*RedisBackend[K, V], error) {
-	// Parse connection string (supports both URLs and simple addresses)
-	opts, err := parseRedisURL(config.ConnectionString)
+// NewRedisBackend creates a new Redis backend. addr can be "host:port" or a
+// redis:// / rediss:// URL.
+func NewRedisBackend[K comparable, V any](addr string, opts ...RedisOption) (*RedisBackend[K, V], error) {
+	cfg := &redisConfig{
+		prefix: "semanticcache:",
+	}
+	for _, o := range opts {
+		o(cfg)
+	}
+
+	redisOpts, err := parseRedisURL(addr)
 	if err != nil {
 		return nil, err
 	}
-
-	// Override with explicit config values if provided
-	if config.Username != "" {
-		opts.Username = config.Username
+	if cfg.username != "" {
+		redisOpts.Username = cfg.username
 	}
-	if config.Password != "" {
-		opts.Password = config.Password
+	if cfg.password != "" {
+		redisOpts.Password = cfg.password
 	}
-	if config.Database != 0 {
-		opts.DB = config.Database
+	if cfg.db != 0 {
+		redisOpts.DB = cfg.db
+	}
+	if cfg.tlsConfig != nil {
+		redisOpts.TLSConfig = cfg.tlsConfig
 	}
 
-	client := redis.NewClient(opts)
+	client := redis.NewClient(redisOpts)
 
-	// Test connection
 	ctx := context.Background()
 	if err := client.Ping(ctx).Err(); err != nil {
 		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
 	}
 
-	prefix := "semanticcache:"
-	if prefixOpt, ok := config.Options["prefix"]; ok {
-		if p, ok := prefixOpt.(string); ok {
-			prefix = p
-		}
-	}
-
-	indexName := prefix + "idx"
-	if indexOpt, ok := config.Options["index_name"]; ok {
-		if idx, ok := indexOpt.(string); ok {
-			indexName = idx
-		}
-	}
-
-	dimensions := 1536 // Default OpenAI embedding dimensions
-	if dimOpt, ok := config.Options["dimensions"]; ok {
-		if d, ok := dimOpt.(int); ok {
-			dimensions = d
-		}
-	}
-
-	backend := &RedisBackend[K, V]{
-		client:     client,
-		prefix:     prefix,
-		indexName:  indexName,
-		dimensions: dimensions,
-	}
-
-	// Initialize vector search index
-	backend.initializeIndex()
-
-	return backend, nil
+	return &RedisBackend[K, V]{
+		client: client,
+		prefix: cfg.prefix,
+	}, nil
 }
 
-// initializeIndex creates the Redis vector search index if it doesn't exist
-func (b *RedisBackend[K, V]) initializeIndex() {
-	ctx := context.Background()
-
-	// Drop existing index if it exists (ignore errors)
-	b.client.FTDropIndex(ctx, b.indexName)
-
-	// Create new index with vector field
-	_, err := b.client.FTCreate(ctx, b.indexName, &redis.FTCreateOptions{
-		OnJSON: true,
-		Prefix: []any{b.prefix},
-	},
-		&redis.FieldSchema{
-			FieldName: "$.key",
-			As:        "key",
-			FieldType: redis.SearchFieldTypeText,
-		},
-		&redis.FieldSchema{
-			FieldName: "$.timestamp",
-			As:        "timestamp",
-			FieldType: redis.SearchFieldTypeNumeric,
-		},
-		&redis.FieldSchema{
-			FieldName: "$.embedding",
-			As:        "embedding",
-			FieldType: redis.SearchFieldTypeVector,
-			VectorArgs: &redis.FTVectorArgs{
-				HNSWOptions: &redis.FTHNSWOptions{
-					Type:           "FLOAT64",
-					Dim:            b.dimensions,
-					DistanceMetric: "COSINE",
-				},
-			},
-		},
-	).Result()
-	if err != nil {
-		// Index might already exist, which is fine - ignore error
-		_ = err
-	}
-}
-
-// keyString converts a key to a Redis key string
 func (b *RedisBackend[K, V]) keyString(key K) string {
 	return fmt.Sprintf("%s%v", b.prefix, key)
 }
 
-// floatsToBytes converts a float64 slice to bytes for Redis storage
-func floatsToBytes(fs []float64) []byte {
-	buf := make([]byte, len(fs)*8)
-	for i, f := range fs {
-		binary.LittleEndian.PutUint64(buf[i*8:(i+1)*8], math.Float64bits(f))
-	}
-	return buf
-}
-
-// Set stores an entry in Redis using JSON.SET
-func (b *RedisBackend[K, V]) Set(ctx context.Context, key K, entry types.Entry[V]) error {
-	redisKey := b.keyString(key)
-
+// Set stores a value with its embedding in Redis.
+func (b *RedisBackend[K, V]) Set(ctx context.Context, key K, embedding []float64, value V) error {
 	doc := redisDocument[V]{
 		Key:       fmt.Sprintf("%v", key),
-		Value:     entry.Value,
-		Embedding: entry.Embedding,
-		Timestamp: time.Now().Unix(),
+		Value:     value,
+		Embedding: embedding,
 	}
-
-	// Store as JSON document
-	_, err := b.client.JSONSet(ctx, redisKey, "$", doc).Result()
+	_, err := b.client.JSONSet(ctx, b.keyString(key), "$", doc).Result()
 	if err != nil {
 		return fmt.Errorf("failed to set entry in Redis: %w", err)
 	}
-
 	return nil
 }
 
-// Get retrieves an entry from Redis using JSON.GET
-func (b *RedisBackend[K, V]) Get(ctx context.Context, key K) (types.Entry[V], bool, error) {
-	redisKey := b.keyString(key)
-
-	result, err := b.client.JSONGet(ctx, redisKey, "$").Result()
+// Get retrieves the value for a key.
+func (b *RedisBackend[K, V]) Get(ctx context.Context, key K) (V, bool, error) {
+	result, err := b.client.JSONGet(ctx, b.keyString(key), "$").Result()
 	if err == redis.Nil {
-		return types.Entry[V]{}, false, nil
+		var zero V
+		return zero, false, nil
 	}
 	if err != nil {
-		return types.Entry[V]{}, false, fmt.Errorf("failed to get entry from Redis: %w", err)
+		var zero V
+		return zero, false, fmt.Errorf("failed to get entry from Redis: %w", err)
 	}
 
 	var docs []redisDocument[V]
 	if err := json.Unmarshal([]byte(result), &docs); err != nil {
-		return types.Entry[V]{}, false, fmt.Errorf("failed to unmarshal entry: %w", err)
+		var zero V
+		return zero, false, fmt.Errorf("failed to unmarshal entry: %w", err)
 	}
-
 	if len(docs) == 0 {
-		return types.Entry[V]{}, false, nil
+		var zero V
+		return zero, false, nil
 	}
-
-	doc := docs[0]
-
-	entry := types.Entry[V]{
-		Embedding: doc.Embedding,
-		Value:     doc.Value,
-	}
-
-	return entry, true, nil
+	return docs[0].Value, true, nil
 }
 
-// Delete removes an entry from Redis
+// Delete removes an entry by key.
 func (b *RedisBackend[K, V]) Delete(ctx context.Context, key K) error {
-	redisKey := b.keyString(key)
-
-	err := b.client.Del(ctx, redisKey).Err()
-	if err != nil {
+	if err := b.client.Del(ctx, b.keyString(key)).Err(); err != nil {
 		return fmt.Errorf("failed to delete entry from Redis: %w", err)
 	}
-
 	return nil
 }
 
-// Contains checks if a key exists in Redis
+// Contains checks whether a key exists.
 func (b *RedisBackend[K, V]) Contains(ctx context.Context, key K) (bool, error) {
-	redisKey := b.keyString(key)
-
-	exists, err := b.client.Exists(ctx, redisKey).Result()
+	n, err := b.client.Exists(ctx, b.keyString(key)).Result()
 	if err != nil {
 		return false, fmt.Errorf("failed to check key existence in Redis: %w", err)
 	}
-
-	return exists > 0, nil
+	return n > 0, nil
 }
 
-// Flush clears all entries with the configured prefix from Redis
-func (b *RedisBackend[K, V]) Flush(ctx context.Context) error {
-	pattern := b.prefix + "*"
-	var keys []string
-	var cursor uint64
-
-	// Use SCAN to get all keys with our prefix
-	for {
-		result, nextCursor, err := b.client.Scan(ctx, cursor, pattern, 100).Result()
-		if err != nil {
-			return fmt.Errorf("failed to scan keys from Redis: %w", err)
-		}
-
-		keys = append(keys, result...)
-		cursor = nextCursor
-		if cursor == 0 {
-			break
-		}
-	}
-
-	if len(keys) > 0 {
-		if err := b.client.Del(ctx, keys...).Err(); err != nil {
-			return fmt.Errorf("failed to flush Redis: %w", err)
-		}
-	}
-
-	return nil
-}
-
-// Len returns the number of entries in Redis with our prefix
-func (b *RedisBackend[K, V]) Len(ctx context.Context) (int, error) {
-	pattern := b.prefix + "*"
-	var count int
-	var cursor uint64
-
-	for {
-		result, nextCursor, err := b.client.Scan(ctx, cursor, pattern, 100).Result()
-		if err != nil {
-			return 0, fmt.Errorf("failed to count keys in Redis: %w", err)
-		}
-
-		count += len(result)
-		cursor = nextCursor
-		if cursor == 0 {
-			break
-		}
-	}
-
-	return count, nil
-}
-
-// Keys returns all keys in Redis with our prefix using SCAN
+// Keys returns all keys stored under the configured prefix.
 func (b *RedisBackend[K, V]) Keys(ctx context.Context) ([]K, error) {
-	pattern := b.prefix + "*"
-	var redisKeys []string
+	var keys []K
 	var cursor uint64
-
 	for {
-		result, nextCursor, err := b.client.Scan(ctx, cursor, pattern, 100).Result()
+		result, next, err := b.client.Scan(ctx, cursor, b.prefix+"*", 100).Result()
 		if err != nil {
-			return nil, fmt.Errorf("failed to get keys from Redis: %w", err)
+			return nil, fmt.Errorf("failed to scan keys from Redis: %w", err)
 		}
-
-		redisKeys = append(redisKeys, result...)
-		cursor = nextCursor
-		if cursor == 0 {
-			break
-		}
-	}
-
-	keys := make([]K, 0, len(redisKeys))
-	prefixLen := len(b.prefix)
-
-	for _, redisKey := range redisKeys {
-		if len(redisKey) > prefixLen {
-			keyStr := redisKey[prefixLen:]
+		for _, rk := range result {
+			raw := strings.TrimPrefix(rk, b.prefix)
 			var key K
-			// Try to convert string back to key type
-			if err := json.Unmarshal(fmt.Appendf(nil, "\"%s\"", keyStr), &key); err == nil {
+			if err := json.Unmarshal(fmt.Appendf(nil, "\"%s\"", raw), &key); err == nil {
 				keys = append(keys, key)
 			}
 		}
+		cursor = next
+		if cursor == 0 {
+			break
+		}
 	}
-
 	return keys, nil
 }
 
-// GetEmbedding retrieves just the embedding for a key using JSON.GET
+// GetEmbedding retrieves the embedding vector for a key.
 func (b *RedisBackend[K, V]) GetEmbedding(ctx context.Context, key K) ([]float64, bool, error) {
-	redisKey := b.keyString(key)
-
-	result, err := b.client.JSONGet(ctx, redisKey, "$.embedding").Result()
+	result, err := b.client.JSONGet(ctx, b.keyString(key), "$").Result()
 	if err == redis.Nil {
 		return nil, false, nil
 	}
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to get embedding from Redis: %w", err)
 	}
-
-	var embeddings [][]float64
-	if err := json.Unmarshal([]byte(result), &embeddings); err != nil {
+	var docs []redisDocument[V]
+	if err := json.Unmarshal([]byte(result), &docs); err != nil {
 		return nil, false, fmt.Errorf("failed to unmarshal embedding: %w", err)
 	}
-
-	if len(embeddings) == 0 {
+	if len(docs) == 0 {
 		return nil, false, nil
 	}
-
-	return embeddings[0], true, nil
+	return docs[0].Embedding, true, nil
 }
 
-// VectorSearch performs vector similarity search using Redis FT.SEARCH
-func (b *RedisBackend[K, V]) VectorSearch(ctx context.Context, queryEmbedding []float64, threshold float64, limit int) ([]K, error) {
-	// Convert embedding to bytes for search
-	embeddingBytes := floatsToBytes(queryEmbedding)
-
-	// Perform vector search
-	query := fmt.Sprintf("*=>[KNN %d @embedding $vec AS vector_distance]", limit)
-
-	results, err := b.client.FTSearchWithArgs(ctx, b.indexName, query, &redis.FTSearchOptions{
-		Return: []redis.FTSearchReturn{
-			{FieldName: "vector_distance"},
-			{FieldName: "key"},
-		},
-		DialectVersion: 2,
-		Params: map[string]any{
-			"vec": embeddingBytes,
-		},
-	}).Result()
-	if err != nil {
-		return nil, fmt.Errorf("vector search error: %w", err)
-	}
-
-	var keys []K
-	for _, doc := range results.Docs {
-		// Get the vector distance (lower is better for cosine similarity)
-		distanceStr, ok := doc.Fields["vector_distance"]
-		if !ok {
-			continue
-		}
-
-		distance, err := strconv.ParseFloat(distanceStr, 32)
+// Flush removes all entries with the configured prefix.
+func (b *RedisBackend[K, V]) Flush(ctx context.Context) error {
+	var cursor uint64
+	for {
+		result, next, err := b.client.Scan(ctx, cursor, b.prefix+"*", 100).Result()
 		if err != nil {
-			continue
+			return fmt.Errorf("failed to scan keys from Redis: %w", err)
 		}
-
-		// Convert distance to similarity (1 - distance for cosine)
-		similarity := 1.0 - distance
-
-		// Check if similarity meets threshold
-		if similarity >= threshold {
-			keyStr, ok := doc.Fields["key"]
-			if !ok {
-				continue
+		if len(result) > 0 {
+			if err := b.client.Del(ctx, result...).Err(); err != nil {
+				return fmt.Errorf("failed to flush Redis: %w", err)
 			}
-
-			var key K
-			if err := json.Unmarshal(fmt.Appendf(nil, "\"%s\"", keyStr), &key); err == nil {
-				keys = append(keys, key)
-			}
+		}
+		cursor = next
+		if cursor == 0 {
+			break
 		}
 	}
-
-	return keys, nil
+	return nil
 }
 
-// Close closes the Redis connection
+// Len returns the number of entries with the configured prefix.
+func (b *RedisBackend[K, V]) Len(ctx context.Context) (int, error) {
+	var count int
+	var cursor uint64
+	for {
+		result, next, err := b.client.Scan(ctx, cursor, b.prefix+"*", 100).Result()
+		if err != nil {
+			return 0, fmt.Errorf("failed to count keys in Redis: %w", err)
+		}
+		count += len(result)
+		cursor = next
+		if cursor == 0 {
+			break
+		}
+	}
+	return count, nil
+}
+
+// Close closes the Redis connection.
 func (b *RedisBackend[K, V]) Close() error {
 	return b.client.Close()
-}
-
-// SetAsync stores an entry asynchronously using Redis pipelining
-func (b *RedisBackend[K, V]) SetAsync(ctx context.Context, key K, entry types.Entry[V]) <-chan error {
-	errCh := make(chan error, 1)
-	go func() {
-		defer close(errCh)
-		errCh <- b.Set(ctx, key, entry)
-	}()
-	return errCh
-}
-
-// GetAsync retrieves an entry asynchronously using Redis pipelining
-func (b *RedisBackend[K, V]) GetAsync(ctx context.Context, key K) <-chan types.AsyncGetResult[V] {
-	resultCh := make(chan types.AsyncGetResult[V], 1)
-	go func() {
-		defer close(resultCh)
-		entry, found, err := b.Get(ctx, key)
-		resultCh <- types.AsyncGetResult[V]{
-			Entry: entry,
-			Found: found,
-			Error: err,
-		}
-	}()
-	return resultCh
-}
-
-// DeleteAsync removes an entry asynchronously using Redis pipelining
-func (b *RedisBackend[K, V]) DeleteAsync(ctx context.Context, key K) <-chan error {
-	errCh := make(chan error, 1)
-	go func() {
-		defer close(errCh)
-		errCh <- b.Delete(ctx, key)
-	}()
-	return errCh
-}
-
-// GetBatchAsync retrieves multiple entries asynchronously using Redis pipeline
-func (b *RedisBackend[K, V]) GetBatchAsync(ctx context.Context, keys []K) <-chan types.AsyncBatchResult[K, V] {
-	resultCh := make(chan types.AsyncBatchResult[K, V], 1)
-	go func() {
-		defer close(resultCh)
-
-		entries := make(map[K]types.Entry[V])
-		pipe := b.client.Pipeline()
-
-		// Build pipeline commands
-		cmds := make(map[K]*redis.JSONCmd)
-		for _, key := range keys {
-			redisKey := b.keyString(key)
-			cmds[key] = pipe.JSONGet(ctx, redisKey, "$")
-		}
-
-		// Execute pipeline
-		_, err := pipe.Exec(ctx)
-		if err != nil && err != redis.Nil {
-			resultCh <- types.AsyncBatchResult[K, V]{
-				Entries: nil,
-				Error:   fmt.Errorf("pipeline execution failed: %w", err),
-			}
-			return
-		}
-
-		// Process results
-		for key, cmd := range cmds {
-			result, err := cmd.Result()
-			if err == redis.Nil {
-				continue
-			}
-			if err != nil {
-				continue
-			}
-
-			var docs []redisDocument[V]
-			if err := json.Unmarshal([]byte(result), &docs); err != nil {
-				continue
-			}
-
-			if len(docs) == 0 {
-				continue
-			}
-
-			doc := docs[0]
-
-			entries[key] = types.Entry[V]{
-				Embedding: doc.Embedding,
-				Value:     doc.Value,
-			}
-		}
-
-		resultCh <- types.AsyncBatchResult[K, V]{
-			Entries: entries,
-			Error:   nil,
-		}
-	}()
-	return resultCh
 }
