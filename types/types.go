@@ -13,6 +13,8 @@ type Entry[V any] struct {
 
 // CacheBackend defines the interface for different cache storage backends.
 // This allows for pluggable storage systems including in-memory and Redis.
+// Only synchronous operations are required. Backends that want native async
+// support can additionally implement AsyncCacheBackend.
 type CacheBackend[K comparable, V any] interface {
 	// Set stores a value with its embedding in the cache
 	Set(ctx context.Context, key K, entry Entry[V]) error
@@ -40,8 +42,14 @@ type CacheBackend[K comparable, V any] interface {
 
 	// Close closes the backend and releases resources
 	Close() error
+}
 
-	// Async operations
+// AsyncCacheBackend is an optional interface that backends can implement
+// to provide native asynchronous operations. If a backend does not implement
+// this interface, the cache will automatically wrap sync methods with goroutines.
+type AsyncCacheBackend[K comparable, V any] interface {
+	CacheBackend[K, V]
+
 	// SetAsync stores a value asynchronously
 	SetAsync(ctx context.Context, key K, entry Entry[V]) <-chan error
 

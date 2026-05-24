@@ -2,10 +2,144 @@ package semanticcache
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/botirk38/semanticcache/options"
+	"github.com/botirk38/semanticcache/types"
 )
+
+// syncOnlyBackend implements only CacheBackend (no AsyncCacheBackend).
+// Used to test that async operations fall back to wrapping sync methods.
+type syncOnlyBackend[K comparable, V any] struct {
+	mu   sync.RWMutex
+	data map[K]types.Entry[V]
+}
+
+func newSyncOnlyBackend[K comparable, V any]() *syncOnlyBackend[K, V] {
+	return &syncOnlyBackend[K, V]{data: make(map[K]types.Entry[V])}
+}
+
+func (b *syncOnlyBackend[K, V]) Set(_ context.Context, key K, entry types.Entry[V]) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.data[key] = entry
+	return nil
+}
+func (b *syncOnlyBackend[K, V]) Get(_ context.Context, key K) (types.Entry[V], bool, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	e, ok := b.data[key]
+	return e, ok, nil
+}
+func (b *syncOnlyBackend[K, V]) Delete(_ context.Context, key K) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.data, key)
+	return nil
+}
+func (b *syncOnlyBackend[K, V]) Contains(_ context.Context, key K) (bool, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	_, ok := b.data[key]
+	return ok, nil
+}
+func (b *syncOnlyBackend[K, V]) Flush(_ context.Context) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.data = make(map[K]types.Entry[V])
+	return nil
+}
+func (b *syncOnlyBackend[K, V]) Len(_ context.Context) (int, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return len(b.data), nil
+}
+func (b *syncOnlyBackend[K, V]) Keys(_ context.Context) ([]K, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	keys := make([]K, 0, len(b.data))
+	for k := range b.data {
+		keys = append(keys, k)
+	}
+	return keys, nil
+}
+func (b *syncOnlyBackend[K, V]) GetEmbedding(_ context.Context, key K) ([]float64, bool, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	e, ok := b.data[key]
+	if !ok {
+		return nil, false, nil
+	}
+	return e.Embedding, true, nil
+}
+func (b *syncOnlyBackend[K, V]) Close() error { return nil }
+
+func TestSyncOnlyBackendAsyncFallback(t *testing.T) {
+	ctx := context.Background()
+
+	cache, err := New(
+		options.WithCustomBackend[string, string](newSyncOnlyBackend[string, string]()),
+		options.WithCustomProvider[string, string](newMockProvider()),
+	)
+	if err != nil {
+		t.Fatalf("Failed to create cache: %v", err)
+	}
+
+	t.Run("SetAsync", func(t *testing.T) {
+		errCh := cache.SetAsync(ctx, "k1", "hello", "v1")
+		if err := <-errCh; err != nil {
+			t.Fatalf("SetAsync failed: %v", err)
+		}
+		val, found, err := cache.Get(ctx, "k1")
+		if err != nil || !found || val != "v1" {
+			t.Fatalf("Expected v1, got %s (found=%v, err=%v)", val, found, err)
+		}
+	})
+
+	t.Run("GetAsync", func(t *testing.T) {
+		resultCh := cache.GetAsync(ctx, "k1")
+		result := <-resultCh
+		if result.Error != nil || !result.Found || result.Value != "v1" {
+			t.Fatalf("GetAsync failed: %+v", result)
+		}
+	})
+
+	t.Run("DeleteAsync", func(t *testing.T) {
+		errCh := cache.DeleteAsync(ctx, "k1")
+		if err := <-errCh; err != nil {
+			t.Fatalf("DeleteAsync failed: %v", err)
+		}
+		_, found, _ := cache.Get(ctx, "k1")
+		if found {
+			t.Fatal("Expected key to be deleted")
+		}
+	})
+
+	t.Run("GetBatchAsync", func(t *testing.T) {
+		_ = cache.Set(ctx, "a", "hello", "va")
+		_ = cache.Set(ctx, "b", "world", "vb")
+		resultCh := cache.GetBatchAsync(ctx, []string{"a", "b", "missing"})
+		result := <-resultCh
+		if result.Error != nil {
+			t.Fatalf("GetBatchAsync failed: %v", result.Error)
+		}
+		if len(result.Values) != 2 {
+			t.Fatalf("Expected 2 values, got %d", len(result.Values))
+		}
+	})
+
+	t.Run("DeleteBatchAsync", func(t *testing.T) {
+		errCh := cache.DeleteBatchAsync(ctx, []string{"a", "b"})
+		if err := <-errCh; err != nil {
+			t.Fatalf("DeleteBatchAsync failed: %v", err)
+		}
+		l, _ := cache.Len(ctx)
+		if l != 0 {
+			t.Fatalf("Expected 0 items, got %d", l)
+		}
+	})
+}
 
 func TestAsyncOperations(t *testing.T) {
 	ctx := context.Background()

@@ -354,7 +354,70 @@ func (sc *SemanticCache[K, V]) Close() error {
 	return nil
 }
 
-// SetAsync stores or updates the entry asynchronously using backend async capabilities.
+// backendSetAsync delegates to the backend's native SetAsync if available,
+// otherwise wraps the sync Set in a goroutine.
+func (sc *SemanticCache[K, V]) backendSetAsync(ctx context.Context, key K, entry types.Entry[V]) <-chan error {
+	if ab, ok := sc.backend.(types.AsyncCacheBackend[K, V]); ok {
+		return ab.SetAsync(ctx, key, entry)
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(errCh)
+		errCh <- sc.backend.Set(ctx, key, entry)
+	}()
+	return errCh
+}
+
+// backendGetAsync delegates to the backend's native GetAsync if available,
+// otherwise wraps the sync Get in a goroutine.
+func (sc *SemanticCache[K, V]) backendGetAsync(ctx context.Context, key K) <-chan types.AsyncGetResult[V] {
+	if ab, ok := sc.backend.(types.AsyncCacheBackend[K, V]); ok {
+		return ab.GetAsync(ctx, key)
+	}
+	resultCh := make(chan types.AsyncGetResult[V], 1)
+	go func() {
+		defer close(resultCh)
+		entry, found, err := sc.backend.Get(ctx, key)
+		resultCh <- types.AsyncGetResult[V]{Entry: entry, Found: found, Error: err}
+	}()
+	return resultCh
+}
+
+// backendDeleteAsync delegates to the backend's native DeleteAsync if available,
+// otherwise wraps the sync Delete in a goroutine.
+func (sc *SemanticCache[K, V]) backendDeleteAsync(ctx context.Context, key K) <-chan error {
+	if ab, ok := sc.backend.(types.AsyncCacheBackend[K, V]); ok {
+		return ab.DeleteAsync(ctx, key)
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(errCh)
+		errCh <- sc.backend.Delete(ctx, key)
+	}()
+	return errCh
+}
+
+// backendGetBatchAsync delegates to the backend's native GetBatchAsync if available,
+// otherwise wraps sync Gets in a goroutine.
+func (sc *SemanticCache[K, V]) backendGetBatchAsync(ctx context.Context, keys []K) <-chan types.AsyncBatchResult[K, V] {
+	if ab, ok := sc.backend.(types.AsyncCacheBackend[K, V]); ok {
+		return ab.GetBatchAsync(ctx, keys)
+	}
+	resultCh := make(chan types.AsyncBatchResult[K, V], 1)
+	go func() {
+		defer close(resultCh)
+		entries := make(map[K]types.Entry[V])
+		for _, key := range keys {
+			if entry, found, err := sc.backend.Get(ctx, key); err == nil && found {
+				entries[key] = entry
+			}
+		}
+		resultCh <- types.AsyncBatchResult[K, V]{Entries: entries}
+	}()
+	return resultCh
+}
+
+// SetAsync stores or updates the entry asynchronously.
 // Returns a channel that will receive an error or nil when complete.
 func (sc *SemanticCache[K, V]) SetAsync(ctx context.Context, key K, inputText string, value V) <-chan error {
 	errCh := make(chan error, 1)
@@ -370,9 +433,7 @@ func (sc *SemanticCache[K, V]) SetAsync(ctx context.Context, key K, inputText st
 			return
 		}
 		entry := types.Entry[V]{Embedding: embedding, Value: value}
-
-		// Use backend's async method
-		backendErrCh := sc.backend.SetAsync(ctx, key, entry)
+		backendErrCh := sc.backendSetAsync(ctx, key, entry)
 		errCh <- <-backendErrCh
 	}()
 	return errCh
@@ -385,15 +446,13 @@ type GetResult[V any] struct {
 	Error error
 }
 
-// GetAsync retrieves the value asynchronously using backend async capabilities.
+// GetAsync retrieves the value asynchronously.
 // Returns a channel that will receive the result when complete.
 func (sc *SemanticCache[K, V]) GetAsync(ctx context.Context, key K) <-chan GetResult[V] {
 	resultCh := make(chan GetResult[V], 1)
 	go func() {
 		defer close(resultCh)
-
-		// Use backend's async method
-		backendResultCh := sc.backend.GetAsync(ctx, key)
+		backendResultCh := sc.backendGetAsync(ctx, key)
 		backendResult := <-backendResultCh
 
 		if backendResult.Error != nil {
@@ -410,10 +469,10 @@ func (sc *SemanticCache[K, V]) GetAsync(ctx context.Context, key K) <-chan GetRe
 	return resultCh
 }
 
-// DeleteAsync removes the entry asynchronously using backend async capabilities.
+// DeleteAsync removes the entry asynchronously.
 // Returns a channel that will receive an error or nil when complete.
 func (sc *SemanticCache[K, V]) DeleteAsync(ctx context.Context, key K) <-chan error {
-	return sc.backend.DeleteAsync(ctx, key)
+	return sc.backendDeleteAsync(ctx, key)
 }
 
 // LookupResult holds the result of an async Lookup operation.
@@ -470,7 +529,7 @@ func (sc *SemanticCache[K, V]) SetBatchAsync(ctx context.Context, items []BatchI
 			}
 		}
 
-		// Process all items and use backend async for each
+		// Process all items concurrently
 		type setResult struct {
 			err error
 		}
@@ -484,7 +543,7 @@ func (sc *SemanticCache[K, V]) SetBatchAsync(ctx context.Context, items []BatchI
 					return
 				}
 				entry := types.Entry[V]{Embedding: embedding, Value: it.Value}
-				backendErrCh := sc.backend.SetAsync(ctx, it.Key, entry)
+				backendErrCh := sc.backendSetAsync(ctx, it.Key, entry)
 				resultCh <- setResult{err: <-backendErrCh}
 			}(item)
 		}
@@ -508,15 +567,14 @@ type GetBatchResult[K comparable, V any] struct {
 	Error  error
 }
 
-// GetBatchAsync retrieves multiple values asynchronously using backend async capabilities.
+// GetBatchAsync retrieves multiple values asynchronously.
 // Returns a channel that will receive the result when complete.
 func (sc *SemanticCache[K, V]) GetBatchAsync(ctx context.Context, keys []K) <-chan GetBatchResult[K, V] {
 	resultCh := make(chan GetBatchResult[K, V], 1)
 	go func() {
 		defer close(resultCh)
 
-		// Use backend's async batch method
-		backendResultCh := sc.backend.GetBatchAsync(ctx, keys)
+		backendResultCh := sc.backendGetBatchAsync(ctx, keys)
 		backendResult := <-backendResultCh
 
 		if backendResult.Error != nil {
@@ -535,14 +593,13 @@ func (sc *SemanticCache[K, V]) GetBatchAsync(ctx context.Context, keys []K) <-ch
 	return resultCh
 }
 
-// DeleteBatchAsync removes multiple entries asynchronously using backend async capabilities.
+// DeleteBatchAsync removes multiple entries asynchronously.
 // Returns a channel that will receive an error or nil when complete.
 func (sc *SemanticCache[K, V]) DeleteBatchAsync(ctx context.Context, keys []K) <-chan error {
 	errCh := make(chan error, 1)
 	go func() {
 		defer close(errCh)
 
-		// Use goroutines to delete keys concurrently
 		type delResult struct {
 			err error
 		}
@@ -550,7 +607,7 @@ func (sc *SemanticCache[K, V]) DeleteBatchAsync(ctx context.Context, keys []K) <
 
 		for _, key := range keys {
 			go func(k K) {
-				backendErrCh := sc.backend.DeleteAsync(ctx, k)
+				backendErrCh := sc.backendDeleteAsync(ctx, k)
 				resultCh <- delResult{err: <-backendErrCh}
 			}(key)
 		}
