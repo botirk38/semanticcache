@@ -6,6 +6,7 @@ import (
 
 	"github.com/botirk38/semanticcache/backends"
 	"github.com/botirk38/semanticcache/chunker"
+	"github.com/botirk38/semanticcache/observability"
 	"github.com/botirk38/semanticcache/providers/openai"
 	"github.com/botirk38/semanticcache/similarity"
 	"github.com/botirk38/semanticcache/types"
@@ -21,6 +22,8 @@ type Config[K comparable, V any] struct {
 	Comparator     similarity.SimilarityFunc
 	ChunkConfig    chunker.ChunkConfig
 	EnableChunking bool
+	Logger         observability.Logger
+	Metrics        observability.Metrics
 }
 
 // NewConfig creates a new configuration with default values
@@ -175,6 +178,30 @@ func WithChunking[K comparable, V any](enabled bool, config ...chunker.ChunkConf
 			}
 			cfg.ChunkConfig = config[0]
 		}
+		return nil
+	}
+}
+
+// WithLogger sets a custom logger for the cache.
+// If not set, a NopLogger is used (no logging).
+func WithLogger[K comparable, V any](logger observability.Logger) Option[K, V] {
+	return func(cfg *Config[K, V]) error {
+		if logger == nil {
+			return errors.New("logger cannot be nil")
+		}
+		cfg.Logger = logger
+		return nil
+	}
+}
+
+// WithMetrics sets a custom metrics collector for the cache.
+// If not set, a NopMetrics is used (no metrics).
+func WithMetrics[K comparable, V any](metrics observability.Metrics) Option[K, V] {
+	return func(cfg *Config[K, V]) error {
+		if metrics == nil {
+			return errors.New("metrics cannot be nil")
+		}
+		cfg.Metrics = metrics
 		return nil
 	}
 }

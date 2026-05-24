@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/botirk38/semanticcache/chunker"
+	"github.com/botirk38/semanticcache/observability"
 	"github.com/botirk38/semanticcache/options"
 	"github.com/botirk38/semanticcache/similarity"
 	"github.com/botirk38/semanticcache/types"
@@ -19,6 +21,8 @@ type SemanticCache[K comparable, V any] struct {
 	comparator     similarity.SimilarityFunc
 	chunker        chunker.Chunker
 	enableChunking bool
+	logger         observability.Logger
+	metrics        observability.Metrics
 }
 
 // Match represents a semantic search result with its similarity score.
@@ -47,11 +51,22 @@ func New[K comparable, V any](opts ...options.Option[K, V]) (*SemanticCache[K, V
 		return nil, err
 	}
 
+	logger := cfg.Logger
+	if logger == nil {
+		logger = observability.NopLogger{}
+	}
+	metrics := cfg.Metrics
+	if metrics == nil {
+		metrics = observability.NopMetrics{}
+	}
+
 	cache := &SemanticCache[K, V]{
 		backend:        cfg.Backend,
 		provider:       cfg.Provider,
 		comparator:     cfg.Comparator,
 		enableChunking: cfg.EnableChunking,
+		logger:         logger,
+		metrics:        metrics,
 	}
 
 	// Initialize chunker lazily only if chunking is enabled
@@ -89,7 +104,9 @@ func NewSemanticCache[K comparable, V any](backend types.CacheBackend[K, V], pro
 		backend:        backend,
 		provider:       provider,
 		comparator:     comparator,
-		enableChunking: true, // Enabled by default
+		enableChunking: true,
+		logger:         observability.NopLogger{},
+		metrics:        observability.NopMetrics{},
 	}
 
 	// Initialize chunker with default config
@@ -127,12 +144,21 @@ func (sc *SemanticCache[K, V]) Set(ctx context.Context, key K, inputText string,
 	}
 
 	// No chunking needed - store normally
+	start := time.Now()
 	embedding, err := sc.provider.EmbedText(inputText)
+	sc.metrics.EmbedLatency(time.Since(start))
 	if err != nil {
+		sc.logger.Error("embed failed", "op", "Set", "key", key, "err", err)
 		return err
 	}
 	entry := types.Entry[V]{Embedding: embedding, Value: value}
-	return sc.backend.Set(ctx, key, entry)
+	bStart := time.Now()
+	err = sc.backend.Set(ctx, key, entry)
+	sc.metrics.BackendLatency("Set", time.Since(bStart))
+	if err != nil {
+		sc.logger.Error("backend set failed", "key", key, "err", err)
+	}
+	return err
 }
 
 // setWithChunks handles storing chunked text with an aggregate embedding
@@ -202,10 +228,17 @@ func (sc *SemanticCache[K, V]) aggregateEmbeddings(embeddings [][]float64) []flo
 
 // Get retrieves the value for key, if present.
 func (sc *SemanticCache[K, V]) Get(ctx context.Context, key K) (V, bool, error) {
+	start := time.Now()
 	entry, found, err := sc.backend.Get(ctx, key)
+	sc.metrics.BackendLatency("Get", time.Since(start))
 	if err != nil {
 		var zero V
 		return zero, false, err
+	}
+	if found {
+		sc.metrics.CacheHit()
+	} else {
+		sc.metrics.CacheMiss()
 	}
 	if !found {
 		var zero V
@@ -236,8 +269,11 @@ func (sc *SemanticCache[K, V]) Len(ctx context.Context) (int, error) {
 
 // Lookup returns the first value whose embedding similarity >= threshold.
 func (sc *SemanticCache[K, V]) Lookup(ctx context.Context, inputText string, threshold float64) (*Match[V], error) {
+	start := time.Now()
 	embedding, err := sc.provider.EmbedText(inputText)
+	sc.metrics.EmbedLatency(time.Since(start))
 	if err != nil {
+		sc.logger.Error("embed failed", "op", "Lookup", "err", err)
 		return nil, err
 	}
 
@@ -263,6 +299,14 @@ func (sc *SemanticCache[K, V]) Lookup(ctx context.Context, inputText string, thr
 				bestScore = score // Update threshold to find even better matches
 			}
 		}
+	}
+
+	if bestMatch != nil {
+		sc.metrics.CacheHit()
+		sc.logger.Debug("lookup hit", "score", bestMatch.Score)
+	} else {
+		sc.metrics.CacheMiss()
+		sc.logger.Debug("lookup miss", "threshold", threshold)
 	}
 
 	return bestMatch, nil
