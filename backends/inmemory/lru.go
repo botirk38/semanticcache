@@ -6,31 +6,50 @@ import (
 
 	"github.com/botirk38/semanticcache/types"
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 )
+
+// lruCache abstracts the two hashicorp LRU implementations.
+type lruCache[K comparable, V any] interface {
+	Add(key K, value V) bool
+	Get(key K) (V, bool)
+	Contains(key K) bool
+	Remove(key K) bool
+	Purge()
+	Len() int
+	Keys() []K
+}
 
 // LRUBackend implements CacheBackend using LRU eviction policy
 type LRUBackend[K comparable, V any] struct {
 	mu    *sync.RWMutex
-	cache *lru.Cache[K, types.Entry[V]]
+	cache lruCache[K, types.Entry[V]]
 	index map[K][]float64
 }
 
-// NewLRUBackend creates a new LRU backend
+// NewLRUBackend creates a new LRU backend.
+// When config.TTL > 0, entries automatically expire after the given duration.
 func NewLRUBackend[K comparable, V any](config types.BackendConfig) (*LRUBackend[K, V], error) {
-	lruCache, err := lru.New[K, types.Entry[V]](config.Capacity)
-	if err != nil {
-		return nil, err
+	var cache lruCache[K, types.Entry[V]]
+	if config.TTL > 0 {
+		cache = expirable.NewLRU[K, types.Entry[V]](config.Capacity, nil, config.TTL)
+	} else {
+		c, err := lru.New[K, types.Entry[V]](config.Capacity)
+		if err != nil {
+			return nil, err
+		}
+		cache = c
 	}
 
 	return &LRUBackend[K, V]{
 		mu:    &sync.RWMutex{},
-		cache: lruCache,
+		cache: cache,
 		index: make(map[K][]float64),
 	}, nil
 }
 
 // Set stores an entry in the LRU cache
-func (b *LRUBackend[K, V]) Set(ctx context.Context, key K, entry types.Entry[V]) error {
+func (b *LRUBackend[K, V]) Set(_ context.Context, key K, entry types.Entry[V]) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -40,7 +59,7 @@ func (b *LRUBackend[K, V]) Set(ctx context.Context, key K, entry types.Entry[V])
 }
 
 // Get retrieves an entry from the LRU cache
-func (b *LRUBackend[K, V]) Get(ctx context.Context, key K) (types.Entry[V], bool, error) {
+func (b *LRUBackend[K, V]) Get(_ context.Context, key K) (types.Entry[V], bool, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -51,7 +70,7 @@ func (b *LRUBackend[K, V]) Get(ctx context.Context, key K) (types.Entry[V], bool
 }
 
 // Delete removes an entry from the LRU cache
-func (b *LRUBackend[K, V]) Delete(ctx context.Context, key K) error {
+func (b *LRUBackend[K, V]) Delete(_ context.Context, key K) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -61,7 +80,7 @@ func (b *LRUBackend[K, V]) Delete(ctx context.Context, key K) error {
 }
 
 // Contains checks if a key exists in the LRU cache
-func (b *LRUBackend[K, V]) Contains(ctx context.Context, key K) (bool, error) {
+func (b *LRUBackend[K, V]) Contains(_ context.Context, key K) (bool, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -69,7 +88,7 @@ func (b *LRUBackend[K, V]) Contains(ctx context.Context, key K) (bool, error) {
 }
 
 // Flush clears all entries from the LRU cache
-func (b *LRUBackend[K, V]) Flush(ctx context.Context) error {
+func (b *LRUBackend[K, V]) Flush(_ context.Context) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -79,7 +98,7 @@ func (b *LRUBackend[K, V]) Flush(ctx context.Context) error {
 }
 
 // Len returns the number of entries in the LRU cache
-func (b *LRUBackend[K, V]) Len(ctx context.Context) (int, error) {
+func (b *LRUBackend[K, V]) Len(_ context.Context) (int, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -87,7 +106,7 @@ func (b *LRUBackend[K, V]) Len(ctx context.Context) (int, error) {
 }
 
 // Keys returns all keys in the LRU cache
-func (b *LRUBackend[K, V]) Keys(ctx context.Context) ([]K, error) {
+func (b *LRUBackend[K, V]) Keys(_ context.Context) ([]K, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -108,7 +127,7 @@ func (b *LRUBackend[K, V]) Keys(ctx context.Context) ([]K, error) {
 }
 
 // GetEmbedding retrieves just the embedding for a key
-func (b *LRUBackend[K, V]) GetEmbedding(ctx context.Context, key K) ([]float64, bool, error) {
+func (b *LRUBackend[K, V]) GetEmbedding(_ context.Context, key K) ([]float64, bool, error) {
 	b.mu.RLock()
 	embedding, hasEmbedding := b.index[key]
 	cacheHasKey := b.cache.Contains(key)

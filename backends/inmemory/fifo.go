@@ -3,27 +3,32 @@ package inmemory
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/botirk38/semanticcache/types"
 )
 
 // FIFOBackend implements CacheBackend using FIFO (First In, First Out) eviction policy
 type FIFOBackend[K comparable, V any] struct {
-	mu       *sync.RWMutex
-	entries  map[K]types.Entry[V]
-	index    map[K][]float64
-	queue    []K
-	capacity int
+	mu        *sync.RWMutex
+	entries   map[K]types.Entry[V]
+	index     map[K][]float64
+	expiresAt map[K]time.Time
+	queue     []K
+	capacity  int
+	ttl       time.Duration
 }
 
 // NewFIFOBackend creates a new FIFO backend
 func NewFIFOBackend[K comparable, V any](config types.BackendConfig) (*FIFOBackend[K, V], error) {
 	return &FIFOBackend[K, V]{
-		mu:       &sync.RWMutex{},
-		entries:  make(map[K]types.Entry[V]),
-		index:    make(map[K][]float64),
-		queue:    make([]K, 0, config.Capacity),
-		capacity: config.Capacity,
+		mu:        &sync.RWMutex{},
+		entries:   make(map[K]types.Entry[V]),
+		index:     make(map[K][]float64),
+		expiresAt: make(map[K]time.Time),
+		queue:     make([]K, 0, config.Capacity),
+		capacity:  config.Capacity,
+		ttl:       config.TTL,
 	}, nil
 }
 
@@ -50,16 +55,23 @@ func (b *FIFOBackend[K, V]) Set(ctx context.Context, key K, entry types.Entry[V]
 	// Add new entry
 	b.entries[key] = entry
 	b.index[key] = entry.Embedding
+	if b.ttl > 0 {
+		b.expiresAt[key] = time.Now().Add(b.ttl)
+	}
 	b.queue = append(b.queue, key)
 	return nil
 }
 
 // Get retrieves an entry from the FIFO cache
 func (b *FIFOBackend[K, V]) Get(ctx context.Context, key K) (types.Entry[V], bool, error) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
 
 	if entry, ok := b.entries[key]; ok {
+		if exp, has := b.expiresAt[key]; has && time.Now().After(exp) {
+			b.removeLocked(key)
+			return types.Entry[V]{}, false, nil
+		}
 		return entry, true, nil
 	}
 	return types.Entry[V]{}, false, nil
@@ -89,10 +101,16 @@ func (b *FIFOBackend[K, V]) Delete(ctx context.Context, key K) error {
 
 // Contains checks if a key exists in the FIFO cache
 func (b *FIFOBackend[K, V]) Contains(ctx context.Context, key K) (bool, error) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
 
 	_, exists := b.entries[key]
+	if exists {
+		if exp, has := b.expiresAt[key]; has && time.Now().After(exp) {
+			b.removeLocked(key)
+			return false, nil
+		}
+	}
 	return exists, nil
 }
 
@@ -103,6 +121,7 @@ func (b *FIFOBackend[K, V]) Flush(ctx context.Context) error {
 
 	b.entries = make(map[K]types.Entry[V])
 	b.index = make(map[K][]float64)
+	b.expiresAt = make(map[K]time.Time)
 	b.queue = make([]K, 0, b.capacity)
 	return nil
 }
@@ -117,11 +136,16 @@ func (b *FIFOBackend[K, V]) Len(ctx context.Context) (int, error) {
 
 // Keys returns all keys in the FIFO cache
 func (b *FIFOBackend[K, V]) Keys(ctx context.Context) ([]K, error) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
 
+	now := time.Now()
 	keys := make([]K, 0, len(b.index))
 	for key := range b.index {
+		if exp, has := b.expiresAt[key]; has && now.After(exp) {
+			b.removeLocked(key)
+			continue
+		}
 		keys = append(keys, key)
 	}
 	return keys, nil
@@ -129,13 +153,31 @@ func (b *FIFOBackend[K, V]) Keys(ctx context.Context) ([]K, error) {
 
 // GetEmbedding retrieves just the embedding for a key
 func (b *FIFOBackend[K, V]) GetEmbedding(ctx context.Context, key K) ([]float64, bool, error) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
 
+	if exp, has := b.expiresAt[key]; has && time.Now().After(exp) {
+		b.removeLocked(key)
+		return nil, false, nil
+	}
 	if embedding, ok := b.index[key]; ok {
 		return embedding, true, nil
 	}
 	return nil, false, nil
+}
+
+// removeLocked removes a key and cleans up all associated maps and the queue.
+// Must be called with b.mu held.
+func (b *FIFOBackend[K, V]) removeLocked(key K) {
+	delete(b.entries, key)
+	delete(b.index, key)
+	delete(b.expiresAt, key)
+	for i, qKey := range b.queue {
+		if qKey == key {
+			b.queue = append(b.queue[:i], b.queue[i+1:]...)
+			break
+		}
+	}
 }
 
 // Close closes the FIFO backend (no-op for in-memory)

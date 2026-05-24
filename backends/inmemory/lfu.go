@@ -3,6 +3,7 @@ package inmemory
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/botirk38/semanticcache/types"
 )
@@ -11,6 +12,7 @@ import (
 type LFUEntry[V any] struct {
 	Entry     types.Entry[V]
 	Frequency int
+	ExpiresAt time.Time // zero means no expiry
 }
 
 // LFUBackend implements CacheBackend using LFU (Least Frequently Used) eviction policy
@@ -19,6 +21,7 @@ type LFUBackend[K comparable, V any] struct {
 	entries  map[K]*LFUEntry[V]
 	index    map[K][]float64
 	capacity int
+	ttl      time.Duration
 }
 
 // NewLFUBackend creates a new LFU backend
@@ -28,6 +31,7 @@ func NewLFUBackend[K comparable, V any](config types.BackendConfig) (*LFUBackend
 		entries:  make(map[K]*LFUEntry[V]),
 		index:    make(map[K][]float64),
 		capacity: config.Capacity,
+		ttl:      config.TTL,
 	}, nil
 }
 
@@ -50,10 +54,14 @@ func (b *LFUBackend[K, V]) Set(ctx context.Context, key K, entry types.Entry[V])
 	}
 
 	// Add new entry with frequency 1
-	b.entries[key] = &LFUEntry[V]{
+	lfuEntry := &LFUEntry[V]{
 		Entry:     entry,
 		Frequency: 1,
 	}
+	if b.ttl > 0 {
+		lfuEntry.ExpiresAt = time.Now().Add(b.ttl)
+	}
+	b.entries[key] = lfuEntry
 	b.index[key] = entry.Embedding
 	return nil
 }
@@ -80,6 +88,11 @@ func (b *LFUBackend[K, V]) Get(ctx context.Context, key K) (types.Entry[V], bool
 	defer b.mu.Unlock()
 
 	if entry, ok := b.entries[key]; ok {
+		if !entry.ExpiresAt.IsZero() && time.Now().After(entry.ExpiresAt) {
+			delete(b.entries, key)
+			delete(b.index, key)
+			return types.Entry[V]{}, false, nil
+		}
 		entry.Frequency++
 		return entry.Entry, true, nil
 	}
@@ -98,10 +111,15 @@ func (b *LFUBackend[K, V]) Delete(ctx context.Context, key K) error {
 
 // Contains checks if a key exists in the LFU cache (without incrementing frequency)
 func (b *LFUBackend[K, V]) Contains(ctx context.Context, key K) (bool, error) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
 
-	_, exists := b.entries[key]
+	entry, exists := b.entries[key]
+	if exists && !entry.ExpiresAt.IsZero() && time.Now().After(entry.ExpiresAt) {
+		delete(b.entries, key)
+		delete(b.index, key)
+		return false, nil
+	}
 	return exists, nil
 }
 
@@ -125,11 +143,19 @@ func (b *LFUBackend[K, V]) Len(ctx context.Context) (int, error) {
 
 // Keys returns all keys in the LFU cache
 func (b *LFUBackend[K, V]) Keys(ctx context.Context) ([]K, error) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
 
+	now := time.Now()
 	keys := make([]K, 0, len(b.index))
 	for key := range b.index {
+		if entry, ok := b.entries[key]; ok {
+			if !entry.ExpiresAt.IsZero() && now.After(entry.ExpiresAt) {
+				delete(b.entries, key)
+				delete(b.index, key)
+				continue
+			}
+		}
 		keys = append(keys, key)
 	}
 	return keys, nil
@@ -137,9 +163,16 @@ func (b *LFUBackend[K, V]) Keys(ctx context.Context) ([]K, error) {
 
 // GetEmbedding retrieves just the embedding for a key (without incrementing frequency)
 func (b *LFUBackend[K, V]) GetEmbedding(ctx context.Context, key K) ([]float64, bool, error) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
 
+	if entry, ok := b.entries[key]; ok {
+		if !entry.ExpiresAt.IsZero() && time.Now().After(entry.ExpiresAt) {
+			delete(b.entries, key)
+			delete(b.index, key)
+			return nil, false, nil
+		}
+	}
 	if embedding, ok := b.index[key]; ok {
 		return embedding, true, nil
 	}

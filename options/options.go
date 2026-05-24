@@ -3,6 +3,7 @@ package options
 
 import (
 	"errors"
+	"time"
 
 	"github.com/botirk38/semanticcache/backends"
 	"github.com/botirk38/semanticcache/chunker"
@@ -86,6 +87,51 @@ func WithLFUBackend[K comparable, V any](capacity int) Option[K, V] {
 	return func(cfg *Config[K, V]) error {
 		backend, err := backends.NewLFUBackend[K, V](types.BackendConfig{
 			Capacity: capacity,
+		})
+		if err != nil {
+			return err
+		}
+		cfg.Backend = backend
+		return nil
+	}
+}
+
+// WithLRUBackendTTL sets up an LRU in-memory backend with time-to-live expiration.
+func WithLRUBackendTTL[K comparable, V any](capacity int, ttl time.Duration) Option[K, V] {
+	return func(cfg *Config[K, V]) error {
+		backend, err := backends.NewLRUBackend[K, V](types.BackendConfig{
+			Capacity: capacity,
+			TTL:      ttl,
+		})
+		if err != nil {
+			return err
+		}
+		cfg.Backend = backend
+		return nil
+	}
+}
+
+// WithFIFOBackendTTL sets up a FIFO in-memory backend with time-to-live expiration.
+func WithFIFOBackendTTL[K comparable, V any](capacity int, ttl time.Duration) Option[K, V] {
+	return func(cfg *Config[K, V]) error {
+		backend, err := backends.NewFIFOBackend[K, V](types.BackendConfig{
+			Capacity: capacity,
+			TTL:      ttl,
+		})
+		if err != nil {
+			return err
+		}
+		cfg.Backend = backend
+		return nil
+	}
+}
+
+// WithLFUBackendTTL sets up an LFU in-memory backend with time-to-live expiration.
+func WithLFUBackendTTL[K comparable, V any](capacity int, ttl time.Duration) Option[K, V] {
+	return func(cfg *Config[K, V]) error {
+		backend, err := backends.NewLFUBackend[K, V](types.BackendConfig{
+			Capacity: capacity,
+			TTL:      ttl,
 		})
 		if err != nil {
 			return err
