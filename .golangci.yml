@@ -13,7 +13,6 @@ linters:
     - gosimple
     - ineffassign
     - gofmt
-    - goimports
     - misspell
     - unconvert
     - unparam
@@ -22,8 +21,6 @@ linters:
       enable-all: true
       disable:
         - fieldalignment
-    goimports:
-      local-prefixes: github.com/botirk38/semanticcache
     misspell:
       locale: US
   exclusions:
@@ -34,5 +31,3 @@ linters:
       - path: _bench_test\.go
         linters:
           - unparam
-    max-issues-per-linter: 50
-    max-same-issues: 10
