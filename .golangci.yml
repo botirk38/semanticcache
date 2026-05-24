@@ -1,3 +1,5 @@
+version: "2"
+
 run:
   timeout: 5m
   go: "1.25"
@@ -16,8 +18,6 @@ linters:
     - misspell
     - unconvert
     - unparam
-    - prealloc
-    - nolintlint
 
 linters-settings:
   govet:
@@ -28,16 +28,12 @@ linters-settings:
     local-prefixes: github.com/botirk38/semanticcache
   misspell:
     locale: US
-  nolintlint:
-    require-explanation: true
-    require-specific: true
 
 issues:
   exclude-rules:
     - path: _test\.go
       linters:
         - unparam
-        - prealloc
     - path: _bench_test\.go
       linters:
         - unparam
