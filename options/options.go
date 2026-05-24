@@ -6,6 +6,7 @@ import (
 
 	"github.com/botirk38/semanticcache/backends"
 	"github.com/botirk38/semanticcache/chunker"
+	"github.com/botirk38/semanticcache/providers/bedrock"
 	"github.com/botirk38/semanticcache/providers/openai"
 	"github.com/botirk38/semanticcache/similarity"
 	"github.com/botirk38/semanticcache/types"
@@ -136,6 +137,18 @@ func WithOpenAIProvider[K comparable, V any](apiKey string, model ...string) Opt
 			return err
 		}
 		cfg.Provider = provider
+		return nil
+	}
+}
+
+// WithBedrockProvider sets up an AWS Bedrock Titan embedding provider.
+func WithBedrockProvider[K comparable, V any](accessKey, secretKey string, opts ...bedrock.Option) Option[K, V] {
+	return func(cfg *Config[K, V]) error {
+		p, err := bedrock.New(accessKey, secretKey, opts...)
+		if err != nil {
+			return err
+		}
+		cfg.Provider = p
 		return nil
 	}
 }
