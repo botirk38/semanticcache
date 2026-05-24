@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	scerrors "github.com/botirk38/semanticcache/errors"
 	"github.com/botirk38/semanticcache/options"
 	"github.com/botirk38/semanticcache/similarity"
 	"github.com/botirk38/semanticcache/types"
@@ -463,10 +462,10 @@ func TestClose(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := cache.Set(ctx, "k", "t", "v"); err != scerrors.ErrClosed {
+	if err := cache.Set(ctx, "k", "t", "v"); err != ErrClosed {
 		t.Errorf("expected ErrClosed, got %v", err)
 	}
-	if _, _, err := cache.Get(ctx, "k"); err != scerrors.ErrClosed {
+	if _, _, err := cache.Get(ctx, "k"); err != ErrClosed {
 		t.Errorf("expected ErrClosed, got %v", err)
 	}
 

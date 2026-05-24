@@ -67,7 +67,7 @@ gofmt -l .
 
 ## Adding a New Backend
 
-1. Implement the `types.CacheBackend[K, V]` interface.
+1. Implement the `types.Backend[K, V]` interface.
 2. Add a constructor in `backends/`.
 3. Add an `options.With*Backend` function in `options/options.go`.
 4. Add integration tests.

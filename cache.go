@@ -6,7 +6,6 @@ import (
 	"sort"
 	"sync/atomic"
 
-	scerrors "github.com/botirk38/semanticcache/errors"
 	"github.com/botirk38/semanticcache/options"
 	"github.com/botirk38/semanticcache/similarity"
 	"github.com/botirk38/semanticcache/types"
@@ -57,13 +56,13 @@ func NewSemanticCache[K comparable, V any](
 	comparator similarity.SimilarityFunc,
 ) (*Cache[K, V], error) {
 	if backend == nil {
-		return nil, scerrors.ErrNilBackend
+		return nil, options.ErrNilBackend
 	}
 	if provider == nil {
-		return nil, scerrors.ErrNilProvider
+		return nil, options.ErrNilProvider
 	}
 	if comparator == nil {
-		return nil, scerrors.ErrNilComparator
+		return nil, options.ErrNilComparator
 	}
 	return &Cache[K, V]{
 		backend:    backend,
@@ -74,7 +73,7 @@ func NewSemanticCache[K comparable, V any](
 
 func (c *Cache[K, V]) checkClosed() error {
 	if c.closed.Load() {
-		return scerrors.ErrClosed
+		return ErrClosed
 	}
 	return nil
 }
@@ -85,7 +84,7 @@ func (c *Cache[K, V]) Set(ctx context.Context, key K, inputText string, value V)
 		return err
 	}
 	if key == *new(K) {
-		return scerrors.ErrZeroKey
+		return ErrZeroKey
 	}
 	embedding, err := c.provider.EmbedText(ctx, inputText)
 	if err != nil {
@@ -177,7 +176,7 @@ func (c *Cache[K, V]) TopMatches(ctx context.Context, inputText string, n int) (
 		return nil, err
 	}
 	if n <= 0 {
-		return nil, scerrors.ErrInvalidN
+		return nil, ErrInvalidN
 	}
 	query, err := c.provider.EmbedText(ctx, inputText)
 	if err != nil {

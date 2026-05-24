@@ -2,6 +2,7 @@
 package providers
 
 import (
+	"github.com/botirk38/semanticcache/providers/local"
 	"github.com/botirk38/semanticcache/providers/openai"
 	"github.com/botirk38/semanticcache/types"
 )
@@ -9,4 +10,9 @@ import (
 // NewOpenAIProvider creates a new OpenAI embedding provider.
 func NewOpenAIProvider(config openai.OpenAIConfig) (types.EmbeddingProvider, error) {
 	return openai.NewOpenAIProvider(config)
+}
+
+// NewLocalProvider creates a hash-based provider for testing.
+func NewLocalProvider(dimensions int) types.EmbeddingProvider {
+	return local.New(dimensions)
 }
